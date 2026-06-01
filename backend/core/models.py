@@ -128,6 +128,7 @@ class Notification(models.Model):
         ('match_left', 'Player Left Match'),
         ('match_cancelled', 'Match Cancelled'),
         ('chat_message', 'New Chat Message'),
+        ('team_chat_message', 'Team Chat Message'),
         ('team_joined', 'Player Joined Team'),
         ('team_left', 'Player Left Team'),
         ('general', 'General'),
@@ -150,7 +151,8 @@ class Notification(models.Model):
 
 
 class ChatMessage(models.Model):
-    match = models.ForeignKey(Match, on_delete=models.CASCADE, related_name='chat_messages')
+    match = models.ForeignKey(Match, on_delete=models.CASCADE, related_name='chat_messages', null=True, blank=True)
+    team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name='chat_messages', null=True, blank=True)
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='chat_messages')
     message = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)

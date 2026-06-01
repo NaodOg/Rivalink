@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../../core/data/repositories/app_repository.dart';
+import '../../core/navigation/app_routes.dart';
 import '../../core/state/session_controller.dart';
 import '../../core/theme/playfair_theme.dart';
+import '../widgets/pf_button.dart';
 import '../widgets/pf_card.dart';
 import '../widgets/pf_scaffold.dart';
 
@@ -39,6 +41,13 @@ class _TeamDetailsScreenState extends State<TeamDetailsScreen> {
     });
   }
 
+  void _openChat() {
+    Navigator.pushNamed(context, AppRoutes.chat, arguments: {
+      'teamId': widget.teamId,
+      'title': '${widget.teamName} Chat',
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return PFScaffold(
@@ -48,9 +57,22 @@ class _TeamDetailsScreenState extends State<TeamDetailsScreen> {
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(widget.teamName),
+        actions: [
+          IconButton(
+            onPressed: _openChat,
+            icon: const Icon(Icons.chat_bubble_outline_rounded),
+            tooltip: 'Team Chat',
+          ),
+        ],
       ),
       body: ListView(
+        padding: const EdgeInsets.all(16),
         children: [
+          PFButton(
+            label: 'Team Chat',
+            onTap: _openChat,
+          ),
+          const SizedBox(height: 20),
           const Text('Roster', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
           const SizedBox(height: 8),
           ..._members.map((m) => PFCard(child: Padding(

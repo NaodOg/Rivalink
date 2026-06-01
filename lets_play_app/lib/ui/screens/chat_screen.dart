@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/data/repositories/app_repository.dart';
+import '../../core/data/services/chat_service.dart';
 import '../../core/state/session_controller.dart';
 import '../../core/theme/playfair_theme.dart';
 import '../widgets/pf_scaffold.dart';
@@ -8,9 +9,10 @@ import '../widgets/pf_scaffold.dart';
 class ChatScreen extends StatefulWidget {
   final SessionController session;
   final AppRepository repo;
-  final int matchId;
+  final int? matchId;
+  final int? teamId;
   final String title;
-  const ChatScreen({super.key, required this.session, required this.repo, required this.matchId, required this.title});
+  const ChatScreen({super.key, required this.session, required this.repo, this.matchId, this.teamId, required this.title});
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -41,7 +43,12 @@ class _ChatScreenState extends State<ChatScreen> {
     if (token == null) return;
     setState(() { _loading = true; _error = null; });
     try {
-      final data = await widget.repo.getMatchChat(token, widget.matchId);
+      List<ChatMessage> data;
+      if (widget.teamId != null) {
+        data = await widget.repo.getTeamChat(token, widget.teamId!);
+      } else {
+        data = await widget.repo.getMatchChat(token, widget.matchId!);
+      }
       if (!mounted) return;
       setState(() {
         _messages = data;
@@ -61,7 +68,12 @@ class _ChatScreenState extends State<ChatScreen> {
     if (text.isEmpty) return;
     final token = widget.session.token;
     if (token == null) return;
-    final res = await widget.repo.sendMatchChat(token, widget.matchId, text);
+    Map<String, dynamic> res;
+    if (widget.teamId != null) {
+      res = await widget.repo.sendTeamChat(token, widget.teamId!, text);
+    } else {
+      res = await widget.repo.sendMatchChat(token, widget.matchId!, text);
+    }
     _input.clear();
     if (!mounted) return;
     if (res['success'] == true) {

@@ -90,8 +90,14 @@ class _PlayFairAppState extends State<PlayFairApp> {
       case AppRoutes.notifications:
         return MaterialPageRoute(builder: (_) => NotificationsScreen(session: _session, repo: _repo));
       case AppRoutes.chat:
-        final map = (args as Map<String, dynamic>? ?? {'matchId': 1, 'title': 'Match Chat'});
-        return MaterialPageRoute(builder: (_) => ChatScreen(session: _session, repo: _repo, matchId: map['matchId'] as int, title: map['title'] as String));
+        final map = (args as Map<String, dynamic>? ?? {'matchId': 1, 'title': 'Chat'});
+        return MaterialPageRoute(builder: (_) => ChatScreen(
+          session: _session,
+          repo: _repo,
+          matchId: map['matchId'] as int?,
+          teamId: map['teamId'] as int?,
+          title: map['title'] as String,
+        ));
       case AppRoutes.payments:
         return MaterialPageRoute(builder: (_) => const PaymentsScreen());
       case AppRoutes.settings:

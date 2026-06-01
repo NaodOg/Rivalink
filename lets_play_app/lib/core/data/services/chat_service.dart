@@ -90,4 +90,54 @@ class ChatService {
       return {'success': false, 'error': 'Connection error: $e'};
     }
   }
+
+  // ── Team Chat ──
+
+  static Future<List<ChatMessage>> getTeamChat({
+    required String token,
+    required int teamId,
+  }) async {
+    try {
+      final headers = await _getHeaders(token);
+      final response = await http.get(
+        Uri.parse('$_baseUrl/teams/$teamId/chat/'),
+        headers: headers,
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final List<dynamic> messagesJson = data['messages'] ?? [];
+        return messagesJson.map((m) => ChatMessage.fromJson(m)).toList();
+      }
+      return [];
+    } catch (e) {
+      print('Error fetching team chat: $e');
+      return [];
+    }
+  }
+
+  static Future<Map<String, dynamic>> sendTeamMessage({
+    required String token,
+    required int teamId,
+    required String message,
+  }) async {
+    try {
+      final headers = await _getHeaders(token);
+      final response = await http.post(
+        Uri.parse('$_baseUrl/teams/$teamId/chat/send/'),
+        headers: headers,
+        body: json.encode({'message': message}),
+      );
+
+      final data = json.decode(response.body);
+
+      if (response.statusCode == 201) {
+        return {'success': true, 'message': data};
+      } else {
+        return {'success': false, 'error': data['error'] ?? 'Failed to send message'};
+      }
+    } catch (e) {
+      return {'success': false, 'error': 'Connection error: $e'};
+    }
+  }
 }

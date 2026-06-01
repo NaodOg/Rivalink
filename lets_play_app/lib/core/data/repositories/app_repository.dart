@@ -8,7 +8,6 @@ import '../services/team_service.dart';
 import '../services/tournament_service.dart';
 import '../services/user_stats_service.dart';
 import '../services/venue_service.dart';
-import '../services/ranking_service.dart';
 import '../../data/seed_data.dart';
 import '../../models/ui_models.dart';
 
@@ -268,5 +267,13 @@ class AppRepository {
 
   Future<Map<String, dynamic>> sendMatchChat(String token, int matchId, String message) {
     return ChatService.sendMessage(token: token, matchId: matchId, message: message);
+  }
+
+  Future<List<ChatMessage>> getTeamChat(String token, int teamId) {
+    return ChatService.getTeamChat(token: token, teamId: teamId);
+  }
+
+  Future<Map<String, dynamic>> sendTeamChat(String token, int teamId, String message) {
+    return ChatService.sendTeamMessage(token: token, teamId: teamId, message: message);
   }
 }

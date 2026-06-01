@@ -7,6 +7,8 @@ import '../widgets/pf_button.dart';
 import '../widgets/pf_card.dart';
 import '../widgets/pf_scaffold.dart';
 
+
+
 class LeagueDetailsScreen extends StatefulWidget {
   final SessionController session;
   final AppRepository repo;
@@ -44,7 +46,42 @@ class _LeagueDetailsScreenState extends State<LeagueDetailsScreen> {
   Future<void> _join() async {
     final token = widget.session.token;
     if (token == null) return;
-    final res = await widget.repo.joinLeague(token, widget.leagueId, 1);
+
+    final teams = await widget.repo.getMyTeams(token);
+    if (!mounted) return;
+
+    if (teams.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('You need to create or join a team first')),
+      );
+      return;
+    }
+
+    if (teams.length == 1) {
+      final res = await widget.repo.joinLeague(token, widget.leagueId, teams[0]['id'] as int);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text((res['message'] ?? res['error'] ?? '').toString())));
+      _load();
+      return;
+    }
+
+    final selected = await showDialog<int>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        backgroundColor: PFColors.card,
+        title: const Text('Choose a team', style: TextStyle(color: PFColors.text)),
+        children: teams.map<Widget>((t) {
+          final name = t['name']?.toString() ?? 'Team';
+          return SimpleDialogOption(
+            onPressed: () => Navigator.pop(ctx, t['id'] as int),
+            child: Text(name, style: const TextStyle(color: PFColors.text, fontSize: 15)),
+          );
+        }).toList(),
+      ),
+    );
+
+    if (selected == null) return;
+    final res = await widget.repo.joinLeague(token, widget.leagueId, selected);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text((res['message'] ?? res['error'] ?? '').toString())));
     _load();

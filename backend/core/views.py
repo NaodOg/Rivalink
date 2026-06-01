@@ -490,6 +490,107 @@ def send_match_chat(request, match_id):
     except Exception as e:
         return Response({'error': f'An error occurred: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
+# ── Team Chat ──
+
+@api_view(['GET'])
+def get_team_chat(request, team_id):
+    """
+    Get chat messages for a team. Only team members can view.
+    """
+    try:
+        team = Team.objects.get(id=team_id)
+
+        is_member = TeamMember.objects.filter(team=team, user=request.user).exists()
+        is_owner = team.owner.id == request.user.id
+
+        if not is_member and not is_owner:
+            return Response(
+                {'error': 'You are not a member of this team'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        messages = ChatMessage.objects.filter(team=team).select_related('user')[:100]
+
+        data = []
+        for m in messages:
+            user_name = f"{m.user.first_name} {m.user.last_name}".strip() or m.user.username
+            data.append({
+                'id': m.id,
+                'user_id': m.user.id,
+                'user_name': user_name,
+                'message': m.message,
+                'created_at': m.created_at.isoformat(),
+            })
+
+        return Response({'messages': data}, status=status.HTTP_200_OK)
+
+    except Team.DoesNotExist:
+        return Response({'error': 'Team not found'}, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        return Response({'error': f'An error occurred: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+def send_team_chat(request, team_id):
+    """
+    Send a chat message to a team. Only team members can send.
+    """
+    try:
+        team = Team.objects.get(id=team_id)
+        message_text = request.data.get('message', '').strip()
+
+        if not message_text:
+            return Response({'error': 'Message cannot be empty'}, status=status.HTTP_400_BAD_REQUEST)
+
+        is_member = TeamMember.objects.filter(team=team, user=request.user).exists()
+        is_owner = team.owner.id == request.user.id
+
+        if not is_member and not is_owner:
+            return Response(
+                {'error': 'You are not a member of this team'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        chat_message = ChatMessage.objects.create(
+            team=team,
+            user=request.user,
+            message=message_text
+        )
+
+        user_name = f"{request.user.first_name} {request.user.last_name}".strip() or request.user.username
+
+        # Notify all other team members
+        other_members = TeamMember.objects.filter(team=team).exclude(user=request.user).values_list('user_id', flat=True)
+        if team.owner.id != request.user.id:
+            other_members = list(other_members) + [team.owner.id]
+        notified = set(other_members)
+        for uid in notified:
+            Notification.objects.create(
+                user_id=uid,
+                notification_type='team_chat_message',
+                title=f'New message in {team.name}',
+                message=f'{user_name}: {message_text[:100]}',
+                related_team=team,
+            )
+
+        return Response({
+            'message': 'Message sent',
+            'chat_message': {
+                'id': chat_message.id,
+                'user_id': request.user.id,
+                'user_name': user_name,
+                'message': message_text,
+                'created_at': chat_message.created_at.isoformat(),
+            }
+        }, status=status.HTTP_201_CREATED)
+
+    except Team.DoesNotExist:
+        return Response({'error': 'Team not found'}, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        return Response({'error': f'An error occurred: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def login(request):
