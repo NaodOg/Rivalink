@@ -1,6 +1,7 @@
 import 'dart:convert';
-import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import '../api_config.dart';
 import '../models/team.dart';
 import '../models/team_member.dart';
 import '../models/team_invitation.dart';
@@ -8,12 +9,7 @@ import '../models/team_activity.dart';
 import 'cache_service.dart' show CacheService;
 
 class TeamService {
-  static String get _baseUrl {
-    if (Platform.isAndroid) {
-      return 'https://unpossessively-pseudonational-shawnta.ngrok-free.dev/api';
-    }
-    return 'https://unpossessively-pseudonational-shawnta.ngrok-free.dev/api';
-  }
+  static String get _baseUrl => ApiConfig.baseUrl;
 
   static Future<Map<String, String>> _getHeaders(String token) async {
     return {
@@ -48,7 +44,7 @@ class TeamService {
       }
       return [];
     } catch (e) {
-      print('Error fetching my teams: $e');
+      debugPrint('Error fetching my teams: $e');
       final cached = await CacheService.getCachedData('${CacheService.teamsKey}_my');
       if (cached != null) {
         final List<dynamic> cachedList = cached as List<dynamic>;
@@ -84,7 +80,7 @@ class TeamService {
       }
       return [];
     } catch (e) {
-      print('Error fetching teams seeking players: $e');
+      debugPrint('Error fetching teams seeking players: $e');
       final cached = await CacheService.getCachedData('${CacheService.teamsKey}_seeking');
       if (cached != null) {
         final List<dynamic> cachedList = cached as List<dynamic>;

@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/data/repositories/app_repository.dart';
 import '../../core/data/services/chat_service.dart';
 import '../../core/state/session_controller.dart';
-import '../../core/theme/playfair_theme.dart';
+import '../../core/theme/rivalink_theme.dart';
 import '../widgets/pf_scaffold.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -130,7 +130,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                     constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
                                     padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
                                     decoration: BoxDecoration(
-                                      color: mine ? PFColors.accent.withValues(alpha: 0.15) : PFColors.card,
+                                      color: mine ? PFColors.primary : PFColors.surfaceHigh,
                                       borderRadius: BorderRadius.only(
                                         topLeft: const Radius.circular(16),
                                         topRight: const Radius.circular(16),
@@ -141,9 +141,20 @@ class _ChatScreenState extends State<ChatScreen> {
                                     child: Column(
                                       crossAxisAlignment: mine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
                                       children: [
-                                        Text(m.userName, style: const TextStyle(color: PFColors.accent, fontSize: 11, fontWeight: FontWeight.w600)),
+                                        Text(m.userName,
+                                            style: TextStyle(
+                                              color: mine
+                                                  ? PFColors.onPrimary.withValues(alpha: 0.7)
+                                                  : PFColors.secondary,
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w700,
+                                            )),
                                         const SizedBox(height: 3),
-                                        Text(m.message, style: const TextStyle(fontSize: 14)),
+                                        Text(m.message,
+                                            style: TextStyle(
+                                              fontSize: 14,
+                                              color: mine ? PFColors.onPrimary : PFColors.text,
+                                            )),
                                       ],
                                     ),
                                   ),

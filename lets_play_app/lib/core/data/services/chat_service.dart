@@ -1,6 +1,7 @@
 import 'dart:convert';
-import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import '../api_config.dart';
 
 class ChatMessage {
   final int id;
@@ -29,12 +30,7 @@ class ChatMessage {
 }
 
 class ChatService {
-  static String get _baseUrl {
-    if (Platform.isAndroid) {
-      return 'https://unpossessively-pseudonational-shawnta.ngrok-free.dev/api';
-    }
-    return 'https://unpossessively-pseudonational-shawnta.ngrok-free.dev/api';
-  }
+  static String get _baseUrl => ApiConfig.baseUrl;
 
   static Future<Map<String, String>> _getHeaders(String token) async {
     return {
@@ -61,7 +57,7 @@ class ChatService {
       }
       return [];
     } catch (e) {
-      print('Error fetching chat: $e');
+      debugPrint('Error fetching chat: $e');
       return [];
     }
   }
@@ -111,7 +107,7 @@ class ChatService {
       }
       return [];
     } catch (e) {
-      print('Error fetching team chat: $e');
+      debugPrint('Error fetching team chat: $e');
       return [];
     }
   }

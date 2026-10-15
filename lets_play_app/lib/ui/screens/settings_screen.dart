@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../../core/navigation/app_routes.dart';
+import '../../core/data/media_config.dart';
+import '../../core/l10n/l10n.dart';
 import '../../core/state/session_controller.dart';
-import '../../core/theme/playfair_theme.dart';
-import '../widgets/pf_button.dart';
+import '../../core/theme/rivalink_theme.dart';
 import '../widgets/pf_card.dart';
 import '../widgets/pf_scaffold.dart';
 
@@ -17,11 +18,11 @@ class SettingsScreen extends StatelessWidget {
       builder: (ctx) => AlertDialog(
         backgroundColor: PFColors.card,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Leave PlayFair?', style: TextStyle(fontWeight: FontWeight.w700)),
+        title: const Text('Leave Rivalink?', style: TextStyle(fontWeight: FontWeight.w700)),
         content: const Text('Are you sure you want to log out?', style: TextStyle(color: PFColors.muted)),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Log Out', style: TextStyle(color: Colors.redAccent))),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Log Out', style: TextStyle(color: PFColors.danger))),
         ],
       ),
     );
@@ -31,12 +32,29 @@ class SettingsScreen extends StatelessWidget {
     Navigator.pushNamedAndRemoveUntil(context, AppRoutes.auth, (_) => false);
   }
 
+  Future<void> _pickLanguage(BuildContext context) async {
+    final code = await showDialog<String>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        backgroundColor: PFColors.surfaceRaised,
+        title: const Text('Language'),
+        children: L10n.languageNames.entries
+            .map((e) => SimpleDialogOption(
+                  onPressed: () => Navigator.pop(ctx, e.key),
+                  child: Text(e.value, style: const TextStyle(fontSize: 15)),
+                ))
+            .toList(),
+      ),
+    );
+    if (code != null) await L10n.setLanguage(code);
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = session.user ?? <String, dynamic>{};
     final name = user['name']?.toString() ?? 'Player';
-    final email = user['email']?.toString() ?? 'player@playfair.app';
-    final profileImage = user['profile_image']?.toString();
+    final email = user['email']?.toString() ?? 'player@Rivalink.app';
+    final profileImage = MediaConfig.resolve(user['profile_image']?.toString());
 
     return PFScaffold(
       appBar: AppBar(
@@ -91,15 +109,26 @@ class SettingsScreen extends StatelessWidget {
           _Section(title: 'ACCOUNT', children: [
             _Tile(icon: Icons.person_outline_rounded, label: 'Edit Profile', onTap: () => Navigator.pushNamed(context, AppRoutes.editProfile)),
             _divider,
+            _Tile(icon: Icons.phone_iphone_rounded, label: 'Verify phone', onTap: () => Navigator.pushNamed(context, AppRoutes.phoneVerify)),
+            _divider,
             _Tile(icon: Icons.lock_outline_rounded, label: 'Change Password', onTap: () {}),
           ]),
           const SizedBox(height: 14),
           _Section(title: 'PREFERENCES', children: [
-            _Tile(icon: Icons.language_rounded, label: 'Language', trailing: const Text('English', style: TextStyle(color: PFColors.muted, fontSize: 14)), onTap: () {}),
+            _Tile(icon: Icons.language_rounded, label: L10n.t('common.language'), trailing: Text(L10n.languageNames[L10n.locale.value] ?? 'English', style: const TextStyle(color: PFColors.muted, fontSize: 14)), onTap: () => _pickLanguage(context)),
             _divider,
             _Tile(icon: Icons.attach_money_rounded, label: 'Currency', trailing: const Text('ETB Br', style: TextStyle(color: PFColors.muted, fontSize: 14)), onTap: () {}),
             _divider,
             _Tile(icon: Icons.color_lens_outlined, label: 'Theme', trailing: const Text('Dark', style: TextStyle(color: PFColors.muted, fontSize: 14)), onTap: () {}),
+          ]),
+          const SizedBox(height: 14),
+          _Section(title: 'Rivalink PREMIUM', children: [
+            _Tile(
+              icon: Icons.diamond_outlined,
+              label: 'Upgrade to Premium',
+              trailing: const Text('100 ETB/mo', style: TextStyle(color: PFColors.accent, fontSize: 13, fontWeight: FontWeight.w600)),
+              onTap: () => Navigator.pushNamed(context, AppRoutes.subscription),
+            ),
           ]),
           const SizedBox(height: 14),
           _Section(title: 'NOTIFICATIONS', children: [
@@ -119,21 +148,29 @@ class SettingsScreen extends StatelessWidget {
           ]),
           const SizedBox(height: 24),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: PFButton(
-              label: 'Log Out',
-              onTap: () => _logout(context),
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: SizedBox(
+              width: double.infinity,
+              height: 52,
+              child: OutlinedButton(
+                onPressed: () => _logout(context),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: PFColors.danger,
+                  side: const BorderSide(color: PFColors.danger),
+                ),
+                child: const Text('Log out'),
+              ),
             ),
           ),
           const SizedBox(height: 12),
-          const Center(child: Text('PlayFair v1.0.0', style: TextStyle(fontSize: 11, color: PFColors.muted))),
+          const Center(child: Text('Rivalink v1.0.0', style: TextStyle(fontSize: 11, color: PFColors.muted))),
         ],
       ),
     );
   }
 }
 
-Widget get _divider => Divider(height: 1, color: PFColors.border.withValues(alpha: 0.25), indent: 48);
+Widget get _divider => const Divider(height: 1, color: PFColors.hairline, indent: 52);
 
 class _Section extends StatelessWidget {
   final String title;
@@ -146,8 +183,8 @@ class _Section extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.only(left: 20, bottom: 8),
-          child: Text(title, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: PFColors.muted, letterSpacing: 1)),
+          padding: const EdgeInsets.only(left: 4, bottom: 10),
+          child: Text(title, style: Theme.of(context).textTheme.labelSmall),
         ),
         PFCard(
           padding: EdgeInsets.zero,

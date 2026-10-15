@@ -1,7 +1,7 @@
 import 'dart:convert';
-import 'dart:io';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
+import '../api_config.dart';
+import 'auth_service.dart';
 
 class Tournament {
   final int id;
@@ -191,17 +191,12 @@ class TournamentMatch {
 }
 
 class TournamentService {
-  static String get _baseUrl {
-    if (Platform.isAndroid) {
-      return 'https://unpossessively-pseudonational-shawnta.ngrok-free.dev/api';
-    }
-    return 'https://unpossessively-pseudonational-shawnta.ngrok-free.dev/api';
-  }
+  static String get _baseUrl => ApiConfig.baseUrl;
 
   static Future<Map<String, String>?> _getAuth() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
+      final session = await AuthService.getSession();
+      final token = session?['token'] as String?;
       if (token == null) return null;
       return {
         'Content-Type': 'application/json',
@@ -220,7 +215,7 @@ class TournamentService {
       if (status != null && status.isNotEmpty) params.add('status=$status');
       if (params.isNotEmpty) url += '?${params.join('&')}';
 
-      final response = await http.get(Uri.parse(url));
+      final response = await http.get(Uri.parse(url)).timeout(ApiConfig.httpTimeout);
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
@@ -229,14 +224,13 @@ class TournamentService {
       }
       return [];
     } catch (e) {
-      print('Error fetching tournaments: $e');
       return [];
     }
   }
 
   static Future<Tournament?> getTournament(int tournamentId) async {
     try {
-      final response = await http.get(Uri.parse('$_baseUrl/tournaments/$tournamentId/'));
+      final response = await http.get(Uri.parse('$_baseUrl/tournaments/$tournamentId/')).timeout(ApiConfig.httpTimeout);
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
@@ -244,14 +238,13 @@ class TournamentService {
       }
       return null;
     } catch (e) {
-      print('Error fetching tournament: $e');
       return null;
     }
   }
 
   static Future<Map<String, dynamic>> getTournamentDetails(int tournamentId) async {
     try {
-      final response = await http.get(Uri.parse('$_baseUrl/tournaments/$tournamentId/'));
+      final response = await http.get(Uri.parse('$_baseUrl/tournaments/$tournamentId/')).timeout(ApiConfig.httpTimeout);
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
@@ -268,8 +261,7 @@ class TournamentService {
       }
       return {'success': false, 'error': 'Failed to load tournament'};
     } catch (e) {
-      print('Error fetching tournament details: $e');
-      return {'success': false, 'error': 'Connection error: $e'};
+      return {'success': false, 'error': 'Connection error'};
     }
   }
 
@@ -281,7 +273,7 @@ class TournamentService {
       final response = await http.get(
         Uri.parse('$_baseUrl/tournaments/my/'),
         headers: headers,
-      );
+      ).timeout(ApiConfig.httpTimeout);
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
@@ -290,7 +282,6 @@ class TournamentService {
       }
       return [];
     } catch (e) {
-      print('Error fetching my tournaments: $e');
       return [];
     }
   }
@@ -328,7 +319,7 @@ class TournamentService {
           'location': location,
           'rules': rules,
         }),
-      );
+      ).timeout(ApiConfig.httpTimeout);
 
       final data = json.decode(response.body);
 
@@ -340,7 +331,7 @@ class TournamentService {
       }
       return {'success': false, 'error': data['error'] ?? 'Failed'};
     } catch (e) {
-      return {'success': false, 'error': 'Connection error: $e'};
+      return {'success': false, 'error': 'Connection error'};
     }
   }
 
@@ -359,7 +350,7 @@ class TournamentService {
           'tournament_id': tournamentId,
           'team_id': teamId,
         }),
-      );
+      ).timeout(ApiConfig.httpTimeout);
 
       final data = json.decode(response.body);
 
@@ -371,7 +362,7 @@ class TournamentService {
       }
       return {'success': false, 'error': data['error'] ?? 'Failed'};
     } catch (e) {
-      return {'success': false, 'error': 'Connection error: $e'};
+      return {'success': false, 'error': 'Connection error'};
     }
   }
 
@@ -383,7 +374,7 @@ class TournamentService {
       final response = await http.post(
         Uri.parse('$_baseUrl/tournaments/$tournamentId/start/'),
         headers: headers,
-      );
+      ).timeout(ApiConfig.httpTimeout);
 
       final data = json.decode(response.body);
 
@@ -395,7 +386,7 @@ class TournamentService {
       }
       return {'success': false, 'error': data['error'] ?? 'Failed'};
     } catch (e) {
-      return {'success': false, 'error': 'Connection error: $e'};
+      return {'success': false, 'error': 'Connection error'};
     }
   }
 
@@ -415,7 +406,7 @@ class TournamentService {
           'score1': score1,
           'score2': score2,
         }),
-      );
+      ).timeout(ApiConfig.httpTimeout);
 
       final data = json.decode(response.body);
 
@@ -427,7 +418,7 @@ class TournamentService {
       }
       return {'success': false, 'error': data['error'] ?? 'Failed'};
     } catch (e) {
-      return {'success': false, 'error': 'Connection error: $e'};
+      return {'success': false, 'error': 'Connection error'};
     }
   }
 }

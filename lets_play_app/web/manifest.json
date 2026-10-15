@@ -1,6 +1,6 @@
 {
-    "name": "lets_play_app",
-    "short_name": "lets_play_app",
+    "name": "Rivalink",
+    "short_name": "Rivalink",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

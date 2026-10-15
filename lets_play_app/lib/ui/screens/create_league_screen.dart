@@ -2,10 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../../core/data/repositories/app_repository.dart';
 import '../../core/state/session_controller.dart';
-import '../../core/theme/playfair_theme.dart';
+import '../../core/theme/rivalink_theme.dart';
 import '../widgets/pf_button.dart';
 import '../widgets/pf_card.dart';
-import '../widgets/pf_scaffold.dart';
 
 class CreateLeagueScreen extends StatefulWidget {
   final SessionController session;
@@ -30,7 +29,9 @@ class _CreateLeagueScreenState extends State<CreateLeagueScreen> {
   bool _saving = false;
 
   final _formats = ['3v3', '5v5', '7v7', '11v11', 'Doubles', 'Singles'];
-  final _sports = ['soccer', 'basketball', 'tennis', 'volleyball', 'cricket', 'esports', 'other'];
+  final _sports = [
+    'soccer', 'basketball', 'tennis', 'volleyball', 'cricket', 'esports', 'other'
+  ];
 
   @override
   void dispose() {
@@ -45,36 +46,34 @@ class _CreateLeagueScreenState extends State<CreateLeagueScreen> {
   Future<void> _save() async {
     final name = _nameCtrl.text.trim();
     if (name.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('League name is required')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('League name is required')));
       return;
     }
-
     setState(() => _saving = true);
     final token = widget.session.token;
-    if (token == null) return;
-
-    final fee = double.tryParse(_feeCtrl.text) ?? 0;
-
+    if (token == null) {
+      setState(() => _saving = false);
+      return;
+    }
     final result = await widget.repo.createLeague(
       token: token,
       name: name,
       sport: _sport,
       format: _format,
       maxTeams: _maxTeams,
-      entryFee: fee,
+      entryFee: double.tryParse(_feeCtrl.text) ?? 0,
       prize: _prizeCtrl.text.trim(),
       location: _locationCtrl.text.trim(),
       startDate: _startDate,
     );
-
     if (!mounted) return;
     setState(() => _saving = false);
-
     if (result['success'] == true) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('League created!')));
       Navigator.pop(context, true);
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result['error']?.toString() ?? 'Failed to create league')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(result['error']?.toString() ?? 'Failed to create league')));
     }
   }
 
@@ -90,171 +89,209 @@ class _CreateLeagueScreenState extends State<CreateLeagueScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return PFScaffold(
+    return Scaffold(
+      backgroundColor: PFColors.background,
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new_rounded),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text('Create League'),
+        title: const Text('Create a league'),
       ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
         children: [
-          PFCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('League Name', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: PFColors.muted)),
-                const SizedBox(height: 6),
-                TextField(
-                  controller: _nameCtrl,
-                  style: const TextStyle(fontSize: 15),
-                  decoration: const InputDecoration(hintText: 'e.g. Addis Premier League'),
-                ),
-                const SizedBox(height: 16),
-                const Text('Sport', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: PFColors.muted)),
-                const SizedBox(height: 6),
-                DropdownButtonFormField<String>(
-                  value: _sport,
-                  dropdownColor: PFColors.card,
-                  items: _sports.map((s) => DropdownMenuItem(value: s, child: Text(s[0].toUpperCase() + s.substring(1), style: const TextStyle(fontSize: 14)))).toList(),
-                  onChanged: (v) {
-                    if (v != null) setState(() => _sport = v);
-                  },
-                  decoration: InputDecoration(
-                    filled: true,
-                    fillColor: PFColors.card,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                const Text('Format', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: PFColors.muted)),
-                const SizedBox(height: 6),
-                DropdownButtonFormField<String>(
-                  value: _format,
-                  dropdownColor: PFColors.card,
-                  items: _formats.map((f) => DropdownMenuItem(value: f, child: Text(f, style: const TextStyle(fontSize: 14)))).toList(),
-                  onChanged: (v) {
-                    if (v != null) setState(() => _format = v);
-                  },
-                  decoration: InputDecoration(
-                    filled: true,
-                    fillColor: PFColors.card,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                const Text('Max Teams', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: PFColors.muted)),
-                const SizedBox(height: 6),
-                Row(
+          Text('Set up the competition',
+              style: Theme.of(context).textTheme.headlineMedium),
+          const SizedBox(height: 6),
+          Text('Premium only — every team member needs Premium to compete.',
+              style: Theme.of(context).textTheme.bodyMedium),
+          const SizedBox(height: PFSpacing.xl),
+          _label('League name'),
+          const SizedBox(height: PFSpacing.sm),
+          TextField(
+            controller: _nameCtrl,
+            textInputAction: TextInputAction.next,
+            decoration: const InputDecoration(hintText: 'e.g. Addis Premier League'),
+          ),
+          const SizedBox(height: PFSpacing.lg),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _teamCountBtn(Icons.remove_rounded, () {
-                      if (_maxTeams > 2) setState(() => _maxTeams--);
-                    }),
-                    const SizedBox(width: 16),
-                    Text('$_maxTeams', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
-                    const SizedBox(width: 16),
-                    _teamCountBtn(Icons.add_rounded, () {
-                      if (_maxTeams < 64) setState(() => _maxTeams++);
-                    }),
+                    _label('Sport'),
+                    const SizedBox(height: PFSpacing.sm),
+                    _sportDropdown(),
                   ],
                 ),
-              ],
-            ),
+              ),
+              const SizedBox(width: PFSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _label('Format'),
+                    const SizedBox(height: PFSpacing.sm),
+                    _formatDropdown(),
+                  ],
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: PFSpacing.lg),
           PFCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Row(
               children: [
-                const Text('Location', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: PFColors.muted)),
-                const SizedBox(height: 6),
-                TextField(
-                  controller: _locationCtrl,
-                  style: const TextStyle(fontSize: 15),
-                  decoration: const InputDecoration(hintText: 'e.g. Addis Ababa Stadium'),
-                ),
-                const SizedBox(height: 16),
-                const Text('Entry Fee (Br)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: PFColors.muted)),
-                const SizedBox(height: 6),
-                TextField(
-                  controller: _feeCtrl,
-                  keyboardType: TextInputType.number,
-                  style: const TextStyle(fontSize: 15),
-                  decoration: const InputDecoration(hintText: '0 = Free'),
-                ),
-                const SizedBox(height: 16),
-                const Text('Prize', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: PFColors.muted)),
-                const SizedBox(height: 6),
-                TextField(
-                  controller: _prizeCtrl,
-                  style: const TextStyle(fontSize: 15),
-                  decoration: const InputDecoration(hintText: 'e.g. Br 10,000 + Trophy'),
-                ),
-                const SizedBox(height: 16),
-                const Text('Description', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: PFColors.muted)),
-                const SizedBox(height: 6),
-                TextField(
-                  controller: _descCtrl,
-                  maxLines: 3,
-                  style: const TextStyle(fontSize: 15),
-                  decoration: const InputDecoration(hintText: 'Tell teams what this league is about'),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-          PFCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Start Date', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: PFColors.muted)),
-                const SizedBox(height: 6),
-                GestureDetector(
-                  onTap: _pickDate,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                    decoration: BoxDecoration(
-                      color: PFColors.card,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.calendar_today_rounded, size: 16, color: PFColors.accent),
-                        const SizedBox(width: 10),
-                        Text(
-                          '${_startDate.day}/${_startDate.month}/${_startDate.year}',
-                          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-                        ),
-                        const Spacer(),
-                        const Icon(Icons.edit_calendar_rounded, size: 18, color: PFColors.muted),
-                      ],
-                    ),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('MAX TEAMS', style: Theme.of(context).textTheme.labelSmall),
+                      const SizedBox(height: 4),
+                      Text('$_maxTeams',
+                          style: PFType.number.copyWith(fontSize: 22)),
+                    ],
                   ),
                 ),
+                _stepper(Icons.remove_rounded, () {
+                  if (_maxTeams > 2) setState(() => _maxTeams--);
+                }),
+                const SizedBox(width: PFSpacing.md),
+                _stepper(Icons.add_rounded, () {
+                  if (_maxTeams < 64) setState(() => _maxTeams++);
+                }),
               ],
             ),
           ),
-          const SizedBox(height: 24),
-          PFButton(
-            label: _saving ? 'Creating...' : 'Create League',
-            onTap: _saving ? () {} : _save,
+          const SizedBox(height: PFSpacing.lg),
+          _label('Details'),
+          const SizedBox(height: PFSpacing.sm),
+          PFCard(
+            child: Column(
+              children: [
+                _field('Location', _locationCtrl, 'e.g. Addis Ababa Stadium'),
+                const SizedBox(height: PFSpacing.md),
+                Row(
+                  children: [
+                    Expanded(child: _field('Entry fee (Br)', _feeCtrl, '0 = free',
+                        keyboard: TextInputType.number)),
+                    const SizedBox(width: PFSpacing.md),
+                    Expanded(child: _field('Prize', _prizeCtrl, 'Br 10,000 + Trophy')),
+                  ],
+                ),
+                const SizedBox(height: PFSpacing.md),
+                _field('Description', _descCtrl, 'What is this league about?', maxLines: 3),
+              ],
+            ),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: PFSpacing.lg),
+          _label('Start date'),
+          const SizedBox(height: PFSpacing.sm),
+          GestureDetector(
+            onTap: _pickDate,
+            child: Container(
+              height: 52,
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              decoration: BoxDecoration(
+                color: PFColors.surface,
+                borderRadius: BorderRadius.circular(PFRadius.md),
+                border: Border.all(color: PFColors.border),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.calendar_today_rounded,
+                      size: 17, color: PFColors.textSecondary),
+                  const SizedBox(width: PFSpacing.sm),
+                  Text('${_startDate.day}/${_startDate.month}/${_startDate.year}',
+                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13.5)),
+                  const Spacer(),
+                  const Icon(Icons.edit_calendar_rounded,
+                      size: 18, color: PFColors.textTertiary),
+                ],
+              ),
+            ),
+          ),
         ],
+      ),
+      bottomNavigationBar: Container(
+        decoration: const BoxDecoration(
+          color: PFColors.surface,
+          border: Border(top: BorderSide(color: PFColors.hairline)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+            child: PFButton(label: 'Create league', loading: _saving, onTap: _save),
+          ),
+        ),
       ),
     );
   }
 
-  Widget _teamCountBtn(IconData icon, VoidCallback onTap) {
+  Widget _label(String t) =>
+      Text(t.toUpperCase(), style: Theme.of(context).textTheme.labelSmall);
+
+  Widget _field(String label, TextEditingController c, String hint,
+      {int maxLines = 1, TextInputType keyboard = TextInputType.text}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: Theme.of(context).textTheme.labelSmall),
+        const SizedBox(height: 6),
+        TextField(
+          controller: c,
+          maxLines: maxLines,
+          keyboardType: keyboard,
+          decoration: InputDecoration(hintText: hint),
+        ),
+      ],
+    );
+  }
+
+  Widget _sportDropdown() => DropdownButtonFormField<String>(
+        value: _sport,
+        isExpanded: true,
+        dropdownColor: PFColors.surfaceRaised,
+        items: _sports
+            .map((s) => DropdownMenuItem(
+                  value: s,
+                  child: Text(s[0].toUpperCase() + s.substring(1),
+                      style: const TextStyle(fontSize: 14)),
+                ))
+            .toList(),
+        onChanged: (v) {
+          if (v != null) setState(() => _sport = v);
+        },
+        decoration: const InputDecoration(hintText: 'Sport'),
+      );
+
+  Widget _formatDropdown() => DropdownButtonFormField<String>(
+        value: _format,
+        isExpanded: true,
+        dropdownColor: PFColors.surfaceRaised,
+        items: _formats
+            .map((f) => DropdownMenuItem(
+                  value: f, child: Text(f, style: const TextStyle(fontSize: 14))))
+            .toList(),
+        onChanged: (v) {
+          if (v != null) setState(() => _format = v);
+        },
+        decoration: const InputDecoration(hintText: 'Format'),
+      );
+
+  Widget _stepper(IconData icon, VoidCallback onTap) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 40, height: 40,
+        width: 44,
+        height: 44,
         decoration: BoxDecoration(
-          color: PFColors.cardSoft,
-          borderRadius: BorderRadius.circular(10),
+          color: PFColors.surfaceHigh,
+          borderRadius: BorderRadius.circular(PFRadius.md),
+          border: Border.all(color: PFColors.border),
         ),
         child: Icon(icon, size: 20, color: PFColors.text),
       ),

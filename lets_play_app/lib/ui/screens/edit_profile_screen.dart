@@ -3,9 +3,10 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../../core/data/media_config.dart';
 import '../../core/data/repositories/app_repository.dart';
 import '../../core/state/session_controller.dart';
-import '../../core/theme/playfair_theme.dart';
+import '../../core/theme/rivalink_theme.dart';
 import '../widgets/pf_button.dart';
 import '../widgets/pf_card.dart';
 import '../widgets/pf_scaffold.dart';
@@ -98,7 +99,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           icon: const Icon(Icons.arrow_back_ios_new_rounded),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text('Edit Profile'),
+        title: const Text('Edit profile'),
       ),
       body: ListView(
         padding: const EdgeInsets.only(bottom: 40),
@@ -115,7 +116,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     backgroundImage: _newImage != null
                         ? FileImage(File(_newImage!.path))
                         : (_existingImageUrl != null && _existingImageUrl!.isNotEmpty
-                            ? NetworkImage(_existingImageUrl!)
+                            ? NetworkImage(MediaConfig.resolve(_existingImageUrl!)!)
                             : null),
                     child: (_newImage == null && (_existingImageUrl == null || _existingImageUrl!.isEmpty))
                         ? const Icon(Icons.person_rounded, size: 48, color: PFColors.muted)
@@ -177,7 +178,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             ),
           ),
           const SizedBox(height: 20),
-          PFButton(label: _saving ? 'Saving...' : 'Save Changes', onTap: _saving ? () {} : _save),
+          PFButton(label: 'Save changes', loading: _saving, onTap: _save),
         ],
       ),
     );

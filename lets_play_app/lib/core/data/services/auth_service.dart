@@ -1,15 +1,11 @@
 import 'dart:convert';
-import 'dart:io';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import '../api_config.dart';
+import 'upload_media_type.dart';
 
 class AuthService {
-  static String get baseUrl {
-    if (Platform.isAndroid) {
-      return 'https://unpossessively-pseudonational-shawnta.ngrok-free.dev/api';
-    }
-    return 'https://unpossessively-pseudonational-shawnta.ngrok-free.dev/api';
-  }
+  static String get baseUrl => ApiConfig.baseUrl;
 
   /// Sign up a new user
   static Future<Map<String, dynamic>> signup({
@@ -30,7 +26,7 @@ class AuthService {
           'password': password,
           'location': location,
         }),
-      );
+      ).timeout(ApiConfig.httpTimeout);
 
       final data = json.decode(response.body);
 
@@ -70,7 +66,7 @@ class AuthService {
           'email': email,
           'password': password,
         }),
-      );
+      ).timeout(ApiConfig.httpTimeout);
 
       final data = json.decode(response.body);
 
@@ -106,7 +102,7 @@ class AuthService {
           'Content-Type': 'application/json',
           'Authorization': 'Token $token',
         },
-      );
+      ).timeout(ApiConfig.httpTimeout);
 
       final data = json.decode(response.body);
 
@@ -133,19 +129,18 @@ class AuthService {
 
   static const String _keyToken = 'auth_token';
   static const String _keyUser = 'user_data';
+  static final FlutterSecureStorage _storage = FlutterSecureStorage();
 
   /// Save session data
   static Future<void> saveSession(String token, Map<String, dynamic> userData) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_keyToken, token);
-    await prefs.setString(_keyUser, json.encode(userData));
+    await _storage.write(key: _keyToken, value: token);
+    await _storage.write(key: _keyUser, value: json.encode(userData));
   }
 
   /// Get saved session data
   static Future<Map<String, dynamic>?> getSession() async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = prefs.getString(_keyToken);
-    final userJson = prefs.getString(_keyUser);
+    final token = await _storage.read(key: _keyToken);
+    final userJson = await _storage.read(key: _keyUser);
 
     if (token != null && userJson != null) {
       return {
@@ -182,7 +177,7 @@ class AuthService {
           'Authorization': 'Token $token',
         },
         body: json.encode(updateData),
-      );
+      ).timeout(ApiConfig.httpTimeout);
 
       final data = json.decode(response.body);
 
@@ -208,6 +203,23 @@ class AuthService {
     }
   }
 
+  /// Fetch the current user's profile
+  static Future<Map<String, dynamic>?> getProfile(String token) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/auth/profile/'),
+        headers: {'Authorization': 'Token $token'},
+      ).timeout(ApiConfig.httpTimeout);
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        return data['user'] as Map<String, dynamic>?;
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Upload profile image
   static Future<Map<String, dynamic>> uploadProfileImage({
     required String token,
@@ -216,8 +228,8 @@ class AuthService {
     try {
       final request = http.MultipartRequest('POST', Uri.parse('$baseUrl/auth/profile/image/'));
       request.headers['Authorization'] = 'Token $token';
-      request.files.add(await http.MultipartFile.fromPath('image', imagePath));
-      final streamed = await request.send();
+      request.files.add(await http.MultipartFile.fromPath('image', imagePath, contentType: imageMediaType(imagePath)));
+      final streamed = await request.send().timeout(ApiConfig.httpTimeout);
       final response = await http.Response.fromStream(streamed);
       final data = json.decode(response.body);
       if (response.statusCode == 200) {
@@ -231,8 +243,7 @@ class AuthService {
 
   /// Clear session data
   static Future<void> clearSession() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_keyToken);
-    await prefs.remove(_keyUser);
+    await _storage.delete(key: _keyToken);
+    await _storage.delete(key: _keyUser);
   }
 }

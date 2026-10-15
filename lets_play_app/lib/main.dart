@@ -5,7 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'core/navigation/app_routes.dart';
 import 'core/data/repositories/app_repository.dart';
 import 'core/state/session_controller.dart';
-import 'core/theme/playfair_theme.dart';
+import 'core/theme/rivalink_theme.dart';
 import 'ui/screens/auth_screen.dart';
 import 'ui/screens/add_field_screen.dart';
 import 'ui/screens/chat_screen.dart';
@@ -21,28 +21,39 @@ import 'ui/screens/payments_screen.dart';
 import 'ui/screens/settings_screen.dart';
 import 'ui/screens/edit_profile_screen.dart';
 import 'ui/screens/shell_screen.dart';
+import 'ui/screens/ranking_screen.dart';
+import 'ui/screens/friends_screen.dart';
+import 'ui/screens/tournaments_screen.dart';
+import 'ui/screens/tournament_detail_screen.dart';
+import 'ui/screens/venue_dashboard_screen.dart';
+import 'ui/screens/referee_screen.dart';
+import 'ui/screens/my_teams_screen.dart';
+import 'ui/screens/phone_verify_screen.dart';
+import 'core/l10n/l10n.dart';
 import 'ui/screens/splash_screen.dart';
 import 'ui/screens/team_details_screen.dart';
+import 'ui/screens/subscription_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const PlayFairApp());
+  runApp(const RivalinkApp());
 }
 
-class PlayFairApp extends StatefulWidget {
-  const PlayFairApp({super.key});
+class RivalinkApp extends StatefulWidget {
+  const RivalinkApp({super.key});
 
   @override
-  State<PlayFairApp> createState() => _PlayFairAppState();
+  State<RivalinkApp> createState() => _RivalinkAppState();
 }
 
-class _PlayFairAppState extends State<PlayFairApp> {
+class _RivalinkAppState extends State<RivalinkApp> {
   final AppRepository _repo = AppRepository();
   late final SessionController _session = SessionController(_repo);
 
   @override
   void initState() {
     super.initState();
+    L10n.load();
     _session.bootstrap();
   }
 
@@ -66,7 +77,9 @@ class _PlayFairAppState extends State<PlayFairApp> {
       case AppRoutes.hostMatch:
         return MaterialPageRoute(builder: (_) => HostMatchScreen(session: _session, repo: _repo));
       case AppRoutes.bookField:
-        return MaterialPageRoute(builder: (_) => ShellScreen(session: _session, repo: _repo, initialIndex: 2));
+        return MaterialPageRoute(
+            builder: (_) => ShellScreen(
+                session: _session, repo: _repo, initialIndex: 1, startExploreVenues: true));
       case AppRoutes.addField:
         return MaterialPageRoute(builder: (_) => AddFieldScreen(session: _session, repo: _repo));
       case AppRoutes.fieldDetails:
@@ -77,20 +90,40 @@ class _PlayFairAppState extends State<PlayFairApp> {
         final map = args as Map<String, dynamic>;
         return MaterialPageRoute(builder: (_) => TeamDetailsScreen(session: _session, repo: _repo, teamId: map['id'] as int, teamName: map['name'] as String));
       case AppRoutes.leagueDetails:
-        final map = (args as Map<String, dynamic>? ?? {'id': 1, 'name': 'League'});
+        final map = args as Map<String, dynamic>;
         return MaterialPageRoute(builder: (_) => LeagueDetailsScreen(session: _session, repo: _repo, leagueId: map['id'] as int, leagueName: map['name'] as String));
       case AppRoutes.createLeague:
         return MaterialPageRoute(builder: (_) => CreateLeagueScreen(session: _session, repo: _repo));
       case AppRoutes.leagues:
-        return MaterialPageRoute(builder: (_) => ShellScreen(session: _session, repo: _repo, initialIndex: 3));
+        return MaterialPageRoute(builder: (_) => ShellScreen(session: _session, repo: _repo, initialIndex: 2));
       case AppRoutes.rankings:
-        return MaterialPageRoute(builder: (_) => ShellScreen(session: _session, repo: _repo, initialIndex: 4));
+        return MaterialPageRoute(builder: (_) => RankingScreen(session: _session, repo: _repo));
+      case AppRoutes.friends:
+        return MaterialPageRoute(builder: (_) => FriendsScreen(session: _session, repo: _repo));
+      case AppRoutes.tournaments:
+        return MaterialPageRoute(builder: (_) => TournamentsScreen(session: _session, repo: _repo));
+      case AppRoutes.tournamentDetails:
+        final map = args as Map<String, dynamic>;
+        return MaterialPageRoute(
+            builder: (_) => TournamentDetailScreen(
+                session: _session,
+                repo: _repo,
+                tournamentId: map['id'] as int,
+                tournamentName: map['name'] as String));
+      case AppRoutes.myVenues:
+        return MaterialPageRoute(builder: (_) => VenueDashboardScreen(session: _session, repo: _repo));
+      case AppRoutes.myTeams:
+        return MaterialPageRoute(builder: (_) => MyTeamsScreen(session: _session, repo: _repo));
+      case AppRoutes.referees:
+        return MaterialPageRoute(builder: (_) => RefereeScreen(session: _session, repo: _repo));
+      case AppRoutes.phoneVerify:
+        return MaterialPageRoute(builder: (_) => PhoneVerifyScreen(session: _session));
       case AppRoutes.profile:
-        return MaterialPageRoute(builder: (_) => ShellScreen(session: _session, repo: _repo, initialIndex: 5));
+        return MaterialPageRoute(builder: (_) => ShellScreen(session: _session, repo: _repo, initialIndex: 3));
       case AppRoutes.notifications:
         return MaterialPageRoute(builder: (_) => NotificationsScreen(session: _session, repo: _repo));
       case AppRoutes.chat:
-        final map = (args as Map<String, dynamic>? ?? {'matchId': 1, 'title': 'Chat'});
+        final map = args as Map<String, dynamic>;
         return MaterialPageRoute(builder: (_) => ChatScreen(
           session: _session,
           repo: _repo,
@@ -102,6 +135,8 @@ class _PlayFairAppState extends State<PlayFairApp> {
         return MaterialPageRoute(builder: (_) => const PaymentsScreen());
       case AppRoutes.settings:
         return MaterialPageRoute(builder: (_) => SettingsScreen(session: _session));
+      case AppRoutes.subscription:
+        return MaterialPageRoute(builder: (_) => SubscriptionScreen(token: _session.token ?? ''));
       case AppRoutes.editProfile:
         return MaterialPageRoute(builder: (_) => EditProfileScreen(session: _session, repo: _repo));
       default:
@@ -111,12 +146,15 @@ class _PlayFairAppState extends State<PlayFairApp> {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'PlayFair',
-      theme: PlayFairTheme.dark,
-      initialRoute: AppRoutes.splash,
-      onGenerateRoute: _route,
+    return ValueListenableBuilder<String>(
+      valueListenable: L10n.locale,
+      builder: (context, _, __) => MaterialApp(
+        debugShowCheckedModeBanner: false,
+        title: 'Rivalink',
+        theme: RivalinkTheme.dark,
+        initialRoute: AppRoutes.splash,
+        onGenerateRoute: _route,
+      ),
     );
   }
 }

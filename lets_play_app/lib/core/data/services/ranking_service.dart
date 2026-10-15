@@ -1,14 +1,9 @@
 import 'dart:convert';
-import 'dart:io';
 import 'package:http/http.dart' as http;
+import '../api_config.dart';
 
 class RankingService {
-  static String get _baseUrl {
-    if (Platform.isAndroid) {
-      return 'https://unpossessively-pseudonational-shawnta.ngrok-free.dev/api';
-    }
-    return 'https://unpossessively-pseudonational-shawnta.ngrok-free.dev/api';
-  }
+  static String get _baseUrl => ApiConfig.baseUrl;
 
   static Future<Map<String, dynamic>> getIndividualRankings({
     required String token,

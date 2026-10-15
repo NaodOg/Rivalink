@@ -1,16 +1,12 @@
 import 'dart:convert';
-import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import '../api_config.dart';
 import '../models/match.dart';
 import 'cache_service.dart' show CacheService;
 
 class MatchService {
-  static String get _baseUrl {
-    if (Platform.isAndroid) {
-      return 'https://unpossessively-pseudonational-shawnta.ngrok-free.dev/api';
-    }
-    return 'https://unpossessively-pseudonational-shawnta.ngrok-free.dev/api';
-  }
+  static String get _baseUrl => ApiConfig.baseUrl;
 
   static Future<Map<String, String>> _getHeaders(String token) async {
     return {
@@ -19,12 +15,12 @@ class MatchService {
     };
   }
 
-  static Future<List<PlayFairMatch>> getMatches(String token, {bool forceRefresh = false}) async {
+  static Future<List<RivalinkMatch>> getMatches(String token, {bool forceRefresh = false}) async {
     if (!forceRefresh) {
       final cached = await CacheService.getCachedData(CacheService.matchesKey);
       if (cached != null) {
         final List<dynamic> cachedList = cached as List<dynamic>;
-        return cachedList.map((match) => PlayFairMatch.fromJson(match)).toList();
+        return cachedList.map((match) => RivalinkMatch.fromJson(match)).toList();
       }
     }
 
@@ -41,22 +37,22 @@ class MatchService {
         
         await CacheService.setCachedData(CacheService.matchesKey, matchesJson, cacheMinutes: 3);
         
-        return matchesJson.map((match) => PlayFairMatch.fromJson(match)).toList();
+        return matchesJson.map((match) => RivalinkMatch.fromJson(match)).toList();
       } else {
         throw Exception('Server returned ${response.statusCode}');
       }
     } catch (e) {
-      print('Error fetching matches: $e');
+      debugPrint('Error fetching matches: $e');
       final cached = await CacheService.getCachedData(CacheService.matchesKey);
       if (cached != null) {
         final List<dynamic> cachedList = cached as List<dynamic>;
-        return cachedList.map((match) => PlayFairMatch.fromJson(match)).toList();
+        return cachedList.map((match) => RivalinkMatch.fromJson(match)).toList();
       }
-      throw e;
+      rethrow;
     }
   }
 
-  static Future<List<PlayFairMatch>> getMyMatches(
+  static Future<List<RivalinkMatch>> getMyMatches(
     String token, {
     String role = 'all',
     String status = 'all',
@@ -76,11 +72,11 @@ class MatchService {
         final data = json.decode(response.body);
         final List<dynamic> matchesJson = data['matches'] ?? [];
         
-        return matchesJson.map((match) => PlayFairMatch.fromJson(match)).toList();
+        return matchesJson.map((match) => RivalinkMatch.fromJson(match)).toList();
       }
       return [];
     } catch (e) {
-      print('Error fetching my matches: $e');
+      debugPrint('Error fetching my matches: $e');
       return [];
     }
   }
@@ -94,6 +90,7 @@ class MatchService {
     required DateTime dateTime,
     int maxPlayers = 10,
     double price = 0,
+    String skillLevel = 'any',
     int? teamId,
   }) async {
     try {
@@ -109,6 +106,7 @@ class MatchService {
           'date_time': dateTime.toUtc().toIso8601String(),
           'max_players': maxPlayers,
           'price': price,
+          'skill_level': skillLevel,
           'team_id': teamId,
         }),
       );
@@ -122,6 +120,70 @@ class MatchService {
       } else {
         return {'success': false, 'error': data['error'] ?? 'Failed to create match'};
       }
+    } catch (e) {
+      return {'success': false, 'error': 'Connection error: $e'};
+    }
+  }
+
+  static Future<List<dynamic>> getRecommendations(String token) async {
+    try {
+      final headers = await _getHeaders(token);
+      final response = await http
+          .get(Uri.parse('$_baseUrl/matches/recommendations/'), headers: headers)
+          .timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        return List<dynamic>.from(data['recommendations'] ?? []);
+      }
+      return [];
+    } catch (e) {
+      debugPrint('Error fetching recommendations: $e');
+      return [];
+    }
+  }
+
+  static Future<Map<String, dynamic>> submitReport({
+    required String token,
+    int? targetUserId,
+    int? matchId,
+    required String category,
+    String details = '',
+  }) async {
+    try {
+      final headers = await _getHeaders(token);
+      final response = await http.post(
+        Uri.parse('$_baseUrl/reports/create/'),
+        headers: headers,
+        body: json.encode({
+          'target_user_id': targetUserId,
+          'match_id': matchId,
+          'category': category,
+          'details': details,
+        }),
+      );
+      final data = json.decode(response.body);
+      if (response.statusCode == 201) {
+        return {'success': true, 'message': data['message']};
+      }
+      return {'success': false, 'error': data['error'] ?? 'Failed to submit report'};
+    } catch (e) {
+      return {'success': false, 'error': 'Connection error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> toggleBlock(String token, int userId) async {
+    try {
+      final headers = await _getHeaders(token);
+      final response = await http.post(
+        Uri.parse('$_baseUrl/blocks/toggle/'),
+        headers: headers,
+        body: json.encode({'user_id': userId}),
+      );
+      final data = json.decode(response.body);
+      if (response.statusCode == 200) {
+        return {'success': true, 'blocked': data['blocked']};
+      }
+      return {'success': false, 'error': data['error'] ?? 'Failed'};
     } catch (e) {
       return {'success': false, 'error': 'Connection error: $e'};
     }
@@ -224,7 +286,7 @@ class MatchService {
     }
   }
 
-  static Future<List<PlayFairMatch>> getMatchHistory(String token) async {
+  static Future<List<RivalinkMatch>> getMatchHistory(String token) async {
     try {
       final headers = await _getHeaders(token);
       final response = await http.get(
@@ -235,16 +297,16 @@ class MatchService {
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         final List<dynamic> matchesJson = data['matches'] ?? [];
-        return matchesJson.map((match) => PlayFairMatch.fromJson(match)).toList();
+        return matchesJson.map((match) => RivalinkMatch.fromJson(match)).toList();
       }
       return [];
     } catch (e) {
-      print('Error fetching match history: $e');
+      debugPrint('Error fetching match history: $e');
       return [];
     }
   }
 
-  static Future<List<PlayFairMatch>> searchMatches({
+  static Future<List<RivalinkMatch>> searchMatches({
     required String token,
     String? sport,
     String? location,
@@ -267,11 +329,11 @@ class MatchService {
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         final List<dynamic> matchesJson = data['matches'] ?? [];
-        return matchesJson.map((match) => PlayFairMatch.fromJson(match)).toList();
+        return matchesJson.map((match) => RivalinkMatch.fromJson(match)).toList();
       }
       return [];
     } catch (e) {
-      print('Error searching matches: $e');
+      debugPrint('Error searching matches: $e');
       return [];
     }
   }

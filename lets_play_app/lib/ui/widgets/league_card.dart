@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../core/theme/playfair_theme.dart';
+import '../../core/theme/rivalink_theme.dart';
 import 'pf_card.dart';
 
 class LeagueCard extends StatelessWidget {
@@ -19,29 +19,37 @@ class LeagueCard extends StatelessWidget {
             width: 52,
             height: 52,
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(13),
-              gradient: const LinearGradient(colors: [Color(0xFF2D372D), Color(0xFF1B231B)]),
+              color: PFColors.surfaceRaised,
+              borderRadius: BorderRadius.circular(PFRadius.md),
+              border: Border.all(color: PFColors.border),
             ),
-            child: const Icon(Icons.emoji_events_rounded, color: PFColors.accent),
+            alignment: Alignment.center,
+            child: const Icon(Icons.emoji_events_rounded, color: PFColors.primary),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: PFSpacing.md),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text((league['name'] ?? '').toString(), style: const TextStyle(fontWeight: FontWeight.w700)),
+                Text((league['name'] ?? '').toString(),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
                 const SizedBox(height: 4),
-                Text('${league['format'] ?? 'League'} • ${league['current_teams'] ?? league['teams'] ?? 0} teams', style: const TextStyle(color: PFColors.muted, fontSize: 12)),
+                Text(
+                  '${league['format'] ?? 'League'} • ${league['current_teams'] ?? league['teams'] ?? 0} teams',
+                  style: const TextStyle(color: PFColors.textSecondary, fontSize: 12),
+                ),
               ],
             ),
           ),
-          Flexible(
-            child: Text(
-              (league['status'] ?? league['status_display'] ?? '').toString(),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: PFColors.accent, fontSize: 12, fontWeight: FontWeight.w600),
-            ),
+          const SizedBox(width: PFSpacing.sm),
+          Text(
+            (league['status'] ?? league['status_display'] ?? '').toString(),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: PFColors.primary, fontSize: 12, fontWeight: FontWeight.w600),
           ),
         ],
       ),

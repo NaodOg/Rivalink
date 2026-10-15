@@ -8,7 +8,8 @@ import '../services/team_service.dart';
 import '../services/tournament_service.dart';
 import '../services/user_stats_service.dart';
 import '../services/venue_service.dart';
-import '../../data/seed_data.dart';
+import '../services/social_service.dart';
+import '../services/phone_verify_service.dart';
 import '../../models/ui_models.dart';
 
 class AppRepository {
@@ -35,22 +36,26 @@ class AppRepository {
   Future<void> clearSession() => AuthService.clearSession();
 
   Future<HomeBundle> getHomeBundle(String token) async {
-    final matches = await MatchService.getMatches(token);
-    final venues = await VenueService.getVenues();
-    final leagues = await LeagueService.getLeagues(token);
-    final teams = await TeamService.getMyTeams(token);
+    final results = await Future.wait<dynamic>([
+      MatchService.getMatches(token),
+      VenueService.getVenues(),
+      LeagueService.getLeagues(token),
+      TeamService.getMyTeams(token),
+      MatchService.getRecommendations(token),
+    ]);
 
     return HomeBundle(
-      upcomingMatches: matches,
-      venues: venues.isEmpty ? SeedData.fields : venues,
-      leagues: leagues.isEmpty ? SeedData.leagues : leagues,
-      teams: teams,
+      upcomingMatches: results[0] as List<dynamic>,
+      venues: results[1] as List<dynamic>,
+      leagues: results[2] as List<dynamic>,
+      teams: results[3] as List<dynamic>,
+      forYou: results[4] as List<dynamic>,
     );
   }
 
-  Future<List<PlayFairMatch>> getMatches(String token, {bool forceRefresh = false}) => MatchService.getMatches(token, forceRefresh: forceRefresh);
+  Future<List<RivalinkMatch>> getMatches(String token, {bool forceRefresh = false}) => MatchService.getMatches(token, forceRefresh: forceRefresh);
 
-  Future<List<PlayFairMatch>> getMyMatches(String token, {required String role, required String status}) {
+  Future<List<RivalinkMatch>> getMyMatches(String token, {required String role, required String status}) {
     return MatchService.getMyMatches(token, role: role, status: status);
   }
 
@@ -67,6 +72,7 @@ class AppRepository {
     required int maxPlayers,
     required double price,
     String description = '',
+    String skillLevel = 'any',
   }) {
     return MatchService.createMatch(
       token: token,
@@ -77,8 +83,38 @@ class AppRepository {
       dateTime: dateTime,
       maxPlayers: maxPlayers,
       price: price,
+      skillLevel: skillLevel,
     );
   }
+
+  Future<List<dynamic>> getRecommendations(String token) =>
+      MatchService.getRecommendations(token);
+
+  Future<Map<String, dynamic>> submitReport({
+    required String token,
+    int? targetUserId,
+    int? matchId,
+    required String category,
+    String details = '',
+  }) {
+    return MatchService.submitReport(
+      token: token,
+      targetUserId: targetUserId,
+      matchId: matchId,
+      category: category,
+      details: details,
+    );
+  }
+
+  Future<Map<String, dynamic>> toggleBlock(String token, int userId) =>
+      MatchService.toggleBlock(token, userId);
+
+  Future<Map<String, dynamic>> getSocialMe(String token) => SocialService.me(token);
+  Future<bool> toggleFollow(String token, int userId) => SocialService.followToggle(token, userId);
+  Future<List<dynamic>> getFollowing(String token) => SocialService.following(token);
+  Future<List<dynamic>> getFollowers(String token) => SocialService.followers(token);
+  Future<List<dynamic>> getTeammates(String token) => SocialService.teammates(token);
+  Future<List<dynamic>> getReferrals(String token) => SocialService.referrals(token);
 
   Future<Map<String, dynamic>> joinMatch(String token, int matchId) {
     return MatchService.joinMatch(token: token, matchId: matchId);
@@ -145,6 +181,10 @@ class AppRepository {
       location: location,
       favoriteSports: favoriteSports,
     );
+  }
+
+  Future<Map<String, dynamic>?> getProfile(String token) {
+    return AuthService.getProfile(token);
   }
 
   Future<Map<String, dynamic>> uploadProfileImage({
@@ -224,6 +264,13 @@ class AppRepository {
   Future<Map<String, dynamic>> getProfileStats(String token, int userId) {
     return UserStatsService.getUserStats(token, userId);
   }
+
+  Future<List<String>> getUserForm(String token, int userId) {
+    return UserStatsService.getUserForm(token, userId);
+  }
+
+  Future<Map<String, dynamic>> getPhoneStatus(String token) =>
+      PhoneVerifyService.status(token);
 
   Future<Map<String, dynamic>> getNotifications(String token) {
     return NotificationService.getNotifications(token);

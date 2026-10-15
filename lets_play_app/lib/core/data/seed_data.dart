@@ -5,7 +5,7 @@ class SeedData {
     Venue(
       id: 1,
       ownerId: 0,
-      ownerName: 'PlayFair',
+      ownerName: 'Rivalink',
       name: 'Bole Stadium',
       description: 'A premier sports venue in the heart of Bole.',
       address: 'Bole Road',
@@ -37,7 +37,7 @@ class SeedData {
     Venue(
       id: 2,
       ownerId: 0,
-      ownerName: 'PlayFair',
+      ownerName: 'Rivalink',
       name: 'Megenagna Arena',
       description: 'Modern sports facility in Megenagna.',
       address: 'Megenagna Road',

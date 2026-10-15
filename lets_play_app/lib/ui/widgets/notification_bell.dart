@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../core/data/repositories/app_repository.dart';
 import '../../core/state/session_controller.dart';
-import '../../core/theme/playfair_theme.dart';
+import '../../core/theme/rivalink_theme.dart';
 
 class NotificationBell extends StatefulWidget {
   final SessionController session;
@@ -49,6 +49,7 @@ class _NotificationBellState extends State<NotificationBell> {
       clipBehavior: Clip.none,
       children: [
         IconButton(
+          tooltip: 'Notifications',
           icon: const Icon(Icons.notifications_outlined, color: PFColors.text, size: 24),
           onPressed: () {
             Navigator.pushNamed(context, '/notifications').then((_) => _fetch());
@@ -56,18 +57,21 @@ class _NotificationBellState extends State<NotificationBell> {
         ),
         if (_initialized && _unreadCount > 0)
           Positioned(
-            top: 2,
-            right: 2,
+            top: 4,
+            right: 4,
             child: Container(
-              padding: const EdgeInsets.all(4),
-              decoration: const BoxDecoration(
-                color: Colors.red,
-                shape: BoxShape.circle,
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+              decoration: BoxDecoration(
+                color: PFColors.danger,
+                borderRadius: BorderRadius.circular(PFRadius.pill),
+                border: Border.all(color: PFColors.background, width: 1.5),
               ),
-              constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+              constraints: const BoxConstraints(minWidth: 18, minHeight: 16),
+              alignment: Alignment.center,
               child: Text(
                 _unreadCount > 99 ? '99+' : '$_unreadCount',
-                style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800),
+                style: const TextStyle(
+                  color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800),
                 textAlign: TextAlign.center,
               ),
             ),

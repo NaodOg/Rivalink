@@ -1,5 +1,5 @@
-class PlayFairMatch {
-  final String id;
+class RivalinkMatch {
+  final int id;
   final String title;
   final String sport;
   final String description;
@@ -12,8 +12,9 @@ class PlayFairMatch {
   final String organizerId;
   final String organizerName;
   final bool isOrganizer;
+  final String skillLevel;
 
-  PlayFairMatch({
+  RivalinkMatch({
     required this.id,
     required this.title,
     required this.sport,
@@ -27,11 +28,12 @@ class PlayFairMatch {
     required this.organizerId,
     this.organizerName = '',
     this.isOrganizer = false,
+    this.skillLevel = 'any',
   });
 
-  factory PlayFairMatch.fromJson(Map<String, dynamic> json) {
-    return PlayFairMatch(
-      id: json['id']?.toString() ?? '',
+  factory RivalinkMatch.fromJson(Map<String, dynamic> json) {
+    return RivalinkMatch(
+      id: json['id'] as int,
       title: json['title'] ?? '',
       sport: json['sport'] ?? '',
       description: json['description'] ?? '',
@@ -44,6 +46,7 @@ class PlayFairMatch {
       organizerId: json['organizer_id']?.toString() ?? '',
       organizerName: json['organizer_name'] ?? '',
       isOrganizer: json['is_organizer'] ?? false,
+      skillLevel: json['skill_level'] ?? 'any',
     );
   }
 

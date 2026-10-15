@@ -1,12 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/navigation/app_routes.dart';
 import '../../core/data/repositories/app_repository.dart';
 import '../../core/state/session_controller.dart';
-import '../../core/theme/playfair_theme.dart';
+import '../../core/theme/rivalink_theme.dart';
+import '../../core/utils/formatters.dart';
+import '../widgets/pf_avatar.dart';
+import '../widgets/pf_badge.dart';
 import '../widgets/pf_button.dart';
 import '../widgets/pf_card.dart';
-import '../widgets/pf_scaffold.dart';
+import '../widgets/pf_empty_state.dart';
+import '../widgets/pf_section_header.dart';
 
 class MatchDetailsScreen extends StatefulWidget {
   final SessionController session;
@@ -22,6 +27,7 @@ class _MatchDetailsScreenState extends State<MatchDetailsScreen> {
   Map<String, dynamic>? _match;
   List<dynamic> _players = [];
   bool _loading = true;
+  bool _error = false;
 
   @override
   void initState() {
@@ -32,6 +38,7 @@ class _MatchDetailsScreenState extends State<MatchDetailsScreen> {
   Future<void> _load() async {
     final token = widget.session.token;
     if (token == null) return;
+    setState(() { _loading = true; _error = false; });
     try {
       final details = await widget.repo.getMatchDetails(token, widget.matchId);
       if (!mounted) return;
@@ -42,17 +49,22 @@ class _MatchDetailsScreenState extends State<MatchDetailsScreen> {
       });
     } catch (_) {
       if (!mounted) return;
-      setState(() => _loading = false);
+      setState(() { _loading = false; _error = true; });
     }
   }
 
   Future<void> _join() async {
     final token = widget.session.token;
     if (token == null) return;
-    final res = await widget.repo.joinMatch(token, widget.matchId);
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text((res['message'] ?? res['error'] ?? '').toString())));
-    _load();
+    try {
+      final res = await widget.repo.joinMatch(token, widget.matchId);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text((res['message'] ?? res['error'] ?? '').toString())));
+      _load();
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to join match.')));
+    }
   }
 
   bool get _isOrganizer {
@@ -74,8 +86,9 @@ class _MatchDetailsScreenState extends State<MatchDetailsScreen> {
 
     for (final p in _players) {
       final group = p['team_group']?.toString() ?? '';
-      if (group == 'A') teamA.add(p);
-      else if (group == 'B') teamB.add(p);
+      if (group == 'A') {
+        teamA.add(p);
+      } else if (group == 'B') teamB.add(p);
       else unassigned.add(p);
     }
 
@@ -94,13 +107,14 @@ class _MatchDetailsScreenState extends State<MatchDetailsScreen> {
                 unassigned.remove(player);
                 teamA.remove(player);
                 teamB.remove(player);
-                if (group == 'A') teamA.add(player);
-                else if (group == 'B') teamB.add(player);
+                if (group == 'A') {
+                  teamA.add(player);
+                } else if (group == 'B') teamB.add(player);
                 else unassigned.add(player);
               });
             }
 
-            _buildPlayerRow(Map<String, dynamic> p, String currentGroup) {
+            buildPlayerRow(Map<String, dynamic> p, String currentGroup) {
               final name = (p['name'] ?? 'Player').toString();
               return Container(
                 padding: const EdgeInsets.symmetric(vertical: 6),
@@ -111,7 +125,7 @@ class _MatchDetailsScreenState extends State<MatchDetailsScreen> {
                       backgroundColor: currentGroup == 'A'
                           ? PFColors.accent.withValues(alpha: 0.25)
                           : currentGroup == 'B'
-                              ? Colors.orange.withValues(alpha: 0.25)
+                              ? PFColors.secondary.withValues(alpha: 0.25)
                               : PFColors.cardSoft,
                       child: Text(name[0].toUpperCase(), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
                     ),
@@ -120,7 +134,7 @@ class _MatchDetailsScreenState extends State<MatchDetailsScreen> {
                     if (currentGroup == 'A')
                       const Icon(Icons.circle, color: PFColors.accent, size: 10)
                     else if (currentGroup == 'B')
-                      const Icon(Icons.circle, color: Colors.orange, size: 10),
+                      const Icon(Icons.circle, color: PFColors.secondary, size: 10),
                     const SizedBox(width: 6),
                     SizedBox(
                       height: 28,
@@ -198,18 +212,18 @@ class _MatchDetailsScreenState extends State<MatchDetailsScreen> {
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(vertical: 10),
                                   decoration: BoxDecoration(
-                                    color: winningGroup == 'B' ? Colors.orange.withValues(alpha: 0.2) : PFColors.card,
+                                    color: winningGroup == 'B' ? PFColors.secondary.withValues(alpha: 0.2) : PFColors.card,
                                     borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(color: winningGroup == 'B' ? Colors.orange : PFColors.border, width: winningGroup == 'B' ? 2 : 1),
+                                    border: Border.all(color: winningGroup == 'B' ? PFColors.secondary : PFColors.border, width: winningGroup == 'B' ? 2 : 1),
                                   ),
                                   child: Column(
                                     children: [
                                       Text('Team B (${teamB.length})', style: TextStyle(
                                         fontSize: 14, fontWeight: FontWeight.w700,
-                                        color: winningGroup == 'B' ? Colors.orange : PFColors.text,
+                                        color: winningGroup == 'B' ? PFColors.secondary : PFColors.text,
                                       )),
                                       if (winningGroup == 'B')
-                                        const Text('WINNER', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: Colors.orange)),
+                                        const Text('WINNER', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: PFColors.secondary)),
                                     ],
                                   ),
                                 ),
@@ -319,17 +333,17 @@ class _MatchDetailsScreenState extends State<MatchDetailsScreen> {
                             if (teamA.isNotEmpty) ...[
                               const SizedBox(height: 8),
                               Text('Team A', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: PFColors.accent)),
-                              ...teamA.map((p) => _buildPlayerRow(p, 'A')),
+                              ...teamA.map((p) => buildPlayerRow(p, 'A')),
                             ],
                             if (teamB.isNotEmpty) ...[
                               const SizedBox(height: 8),
-                              Text('Team B', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.orange)),
-                              ...teamB.map((p) => _buildPlayerRow(p, 'B')),
+                              Text('Team B', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: PFColors.secondary)),
+                              ...teamB.map((p) => buildPlayerRow(p, 'B')),
                             ],
                             if (unassigned.isNotEmpty) ...[
                               const SizedBox(height: 8),
                               const Text('Unassigned', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: PFColors.muted)),
-                              ...unassigned.map((p) => _buildPlayerRow(p, '')),
+                              ...unassigned.map((p) => buildPlayerRow(p, '')),
                             ],
                           ],
                           if (_isTeamSport && (teamA.isEmpty || teamB.isEmpty))
@@ -404,215 +418,146 @@ class _MatchDetailsScreenState extends State<MatchDetailsScreen> {
     );
   }
 
+  String get _sport => _match?['sport']?.toString() ?? 'sport';
+  String get _title => _match?['title']?.toString() ?? 'Match';
+  String get _location => _match?['location']?.toString() ?? '';
+  String get _description => _match?['description']?.toString() ?? '';
+  String get _organizer => _match?['organizer_name']?.toString() ?? 'Host';
+  DateTime get _dateTime =>
+      DateTime.tryParse(_match?['date_time']?.toString() ?? '') ?? DateTime.now();
+  int get _max => (_match?['max_players'] ?? 10) as int;
+  int get _current => (_match?['current_players'] ?? 0) as int;
+  int get _spots => (_match?['spots_left'] ?? (_max - _current)) as int;
+
+  String get _skill => _match?['skill_level']?.toString() ?? 'any';
+
   @override
   Widget build(BuildContext context) {
-    return PFScaffold(
+    return Scaffold(
+      backgroundColor: PFColors.background,
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
+        backgroundColor: Colors.transparent,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new_rounded),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text('Match Details'),
-        actions: [IconButton(onPressed: () => Navigator.pushNamed(context, AppRoutes.chat, arguments: {'matchId': widget.matchId, 'title': 'Match Chat'}), icon: const Icon(Icons.chat_bubble_outline_rounded))],
-      ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator(color: PFColors.accent))
-          : _match == null
-              ? const Center(child: Text('Match not found', style: TextStyle(color: PFColors.muted)))
-              : ListView(
-                  padding: const EdgeInsets.only(top: 4, bottom: 100),
-                  children: [
-                    _buildHeader(),
-                    const SizedBox(height: 14),
-                    _buildInfoCards(),
-                    const SizedBox(height: 14),
-                    _buildPlayersCard(),
-                  ],
-                ),
-      bottomNavigationBar: _match != null ? _buildBottomBar() : null,
-    );
-  }
-
-  Widget _buildHeader() {
-    final sport = _match?['sport']?.toString() ?? 'Sport';
-    final title = _match?['title']?.toString() ?? 'Match';
-    final dateTimeStr = _match?['date_time']?.toString() ?? '';
-    final location = _match?['location']?.toString() ?? '';
-
-    final sportIcon = _sportIcon(sport);
-    final gradientColors = _sportGradient(sport);
-
-    return PFCard(
-      padding: EdgeInsets.zero,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(18),
-        child: Container(
-          decoration: BoxDecoration(gradient: LinearGradient(colors: gradientColors, begin: Alignment.topLeft, end: Alignment.bottomRight)),
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: Colors.black26,
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(sportIcon, size: 16, color: PFColors.accent),
-                          const SizedBox(width: 6),
-                          Text(sport.toUpperCase(), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: PFColors.accent, letterSpacing: 1.2)),
-                        ],
-                      ),
-                    ),
-                    const Spacer(),
-                    _buildStatusBadge(),
-                  ],
-                ),
-                const SizedBox(height: 20),
-                Text(title, style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w900, height: 1.1)),
-                const SizedBox(height: 14),
-                Row(
-                  children: [
-                    const Icon(Icons.calendar_today_rounded, size: 14, color: PFColors.muted),
-                    const SizedBox(width: 6),
-                    Text(_formatDate(dateTimeStr), style: const TextStyle(fontSize: 13, color: PFColors.muted)),
-                    const SizedBox(width: 18),
-                    const Icon(Icons.location_on_rounded, size: 14, color: PFColors.muted),
-                    const SizedBox(width: 6),
-                    Flexible(child: Text(location, style: const TextStyle(fontSize: 13, color: PFColors.muted), overflow: TextOverflow.ellipsis)),
-                  ],
-                ),
+        actions: [
+          IconButton(
+            tooltip: 'Match chat',
+            onPressed: () => Navigator.pushNamed(context, AppRoutes.chat,
+                arguments: {'matchId': widget.matchId, 'title': 'Match chat'}),
+            icon: const Icon(Icons.chat_bubble_outline_rounded),
+          ),
+          if (_match != null)
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert_rounded),
+              color: PFColors.surfaceRaised,
+              onSelected: (v) {
+                if (v == 'report') _reportHost();
+                if (v == 'share') _shareMatch();
+              },
+              itemBuilder: (_) => [
+                const PopupMenuItem(value: 'share', child: Text('Share match')),
+                if (!_isOrganizer)
+                  const PopupMenuItem(value: 'report', child: Text('Report host')),
               ],
             ),
-          ),
-        ),
+        ],
       ),
+      body: _body(),
+      bottomNavigationBar: _match != null ? _bottomBar() : null,
     );
   }
 
-  Widget _buildStatusBadge() {
-    final max = _match?['max_players'] ?? 10;
-    final current = _match?['current_players'] ?? 0;
-    final spots = _match?['spots_left'] ?? (max - current);
-    final isFull = spots <= 0;
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: isFull ? Colors.red.withValues(alpha: 0.2) : PFColors.accent.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: isFull ? Colors.red.withValues(alpha: 0.4) : PFColors.accent.withValues(alpha: 0.3)),
-      ),
-      child: Text(
-        isFull ? 'FULL' : '$spots SPOTS LEFT',
-        style: TextStyle(
-          fontSize: 10,
-          fontWeight: FontWeight.w800,
-          letterSpacing: 1,
-          color: isFull ? Colors.red : PFColors.accent,
-        ),
-      ),
+  void _shareMatch() {
+    final spots = _spots <= 0 ? 'Full' : '$_spots spots left';
+    Clipboard.setData(ClipboardData(
+      text: '${_sport.toUpperCase()} · $_title\n${prettyDate(_dateTime)} · $_location\n$spots — join on Rivalink!',
+    ));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Match details copied — paste to share')),
     );
   }
 
-  Widget _buildInfoCards() {
-    final max = _match?['max_players'] ?? 10;
-    final current = _match?['current_players'] ?? 0;
-    final spots = _match?['spots_left'] ?? (max - current);
-    final price = _match?['price'] ?? 0;
-    final description = _match?['description']?.toString() ?? '';
-    final organizer = _match?['organizer_name']?.toString() ?? 'Host';
-
-    final ratio = max > 0 ? current / max : 0.0;
-
-    return Column(
-      children: [
-        PFCard(
-          child: Column(
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('Players', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: PFColors.muted)),
-                        const SizedBox(height: 6),
-                        Text('$current / $max', style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900)),
-                        const SizedBox(height: 8),
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(999),
-                          child: LinearProgressIndicator(
-                            value: ratio.clamp(0.0, 1.0),
-                            minHeight: 6,
-                            backgroundColor: PFColors.border,
-                            valueColor: AlwaysStoppedAnimation(ratio >= 1 ? Colors.red : PFColors.accent),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 24),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      const Text('Price', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: PFColors.muted)),
-                      const SizedBox(height: 6),
-                      Text(
-                        price is num && price == 0 ? 'Free' : 'Br $price',
-                        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: PFColors.accent),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        '${spots > 0 ? spots : 0} left',
-                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: spots > 0 ? PFColors.accent : Colors.red),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-        if (description.isNotEmpty) ...[
-          const SizedBox(height: 10),
-          PFCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('Details', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: PFColors.muted)),
-                const SizedBox(height: 8),
-                Text(description, style: const TextStyle(fontSize: 14, height: 1.5, color: PFColors.text)),
-              ],
-            ),
+  Future<void> _reportHost() async {
+    final token = widget.session.token;
+    final hostId = _match?['organizer_id'];
+    if (token == null || hostId == null) return;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: PFColors.surfaceRaised,
+        title: const Text('Report host?'),
+        content: const Text('This helps keep Rivalink safe. Our team will review it.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Report', style: TextStyle(color: PFColors.danger)),
           ),
         ],
-        const SizedBox(height: 10),
-        PFCard(
-          child: Row(
+      ),
+    );
+    if (confirm != true) return;
+    final res = await widget.repo.submitReport(
+      token: token,
+      targetUserId: hostId as int,
+      matchId: widget.matchId,
+      category: 'abuse',
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(res['success'] == true ? 'Report submitted' : 'Could not submit report')),
+    );
+  }
+
+  Widget _body() {
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator(color: PFColors.primary));
+    }
+    if (_error) {
+      return Center(
+        child: PFEmptyState(
+          icon: Icons.cloud_off_rounded,
+          title: "Couldn't load match",
+          message: 'Check your connection and try again.',
+          actionLabel: 'Retry',
+          onAction: _load,
+        ),
+      );
+    }
+    if (_match == null) {
+      return const Center(
+        child: PFEmptyState(icon: Icons.search_off_rounded, title: 'Match not found'),
+      );
+    }
+    return ListView(
+      padding: EdgeInsets.zero,
+      children: [
+        _hero(),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              CircleAvatar(
-                radius: 18,
-                backgroundColor: PFColors.accent.withValues(alpha: 0.15),
-                child: Text(organizer.isNotEmpty ? organizer[0].toUpperCase() : '?', style: const TextStyle(fontWeight: FontWeight.w800, color: PFColors.accent)),
+              _stats(),
+              if (_description.isNotEmpty) ...[
+                const SizedBox(height: PFSpacing.lg),
+                _descriptionCard(),
+              ],
+              const SizedBox(height: PFSpacing.lg),
+              _organizerCard(),
+              const SizedBox(height: PFSpacing.xxl),
+              PFSectionHeader(
+                eyebrow: 'Roster',
+                title: 'Lineup',
+                trailing: PFBadge(
+                    label: '${_players.length} joined',
+                    color: PFColors.textSecondary),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Organized by', style: TextStyle(fontSize: 11, color: PFColors.muted)),
-                    Text(organizer, style: const TextStyle(fontWeight: FontWeight.w700)),
-                  ],
-                ),
-              ),
-              Icon(Icons.verified_rounded, size: 18, color: PFColors.accent.withValues(alpha: 0.6)),
+              const SizedBox(height: PFSpacing.md),
+              _lineup(),
             ],
           ),
         ),
@@ -620,169 +565,268 @@ class _MatchDetailsScreenState extends State<MatchDetailsScreen> {
     );
   }
 
-  Widget _buildPlayersCard() {
-    return PFCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _hero() {
+    final color = PFSport.color(_sport);
+    final topPad = MediaQuery.paddingOf(context).top + kToolbarHeight;
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            color.withValues(alpha: 0.22),
+            PFColors.surface,
+            PFColors.background,
+          ],
+          stops: const [0.0, 0.55, 1.0],
+        ),
+      ),
+      child: Stack(
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text('Participants (${_players.length})', style: const TextStyle(fontWeight: FontWeight.w700)),
-              if (_players.isNotEmpty)
-                Text('${_players.length} joined', style: const TextStyle(fontSize: 12, color: PFColors.accent)),
-            ],
+          Positioned(
+            right: -34,
+            top: topPad - 18,
+            child: Icon(
+              PFSport.icon(_sport),
+              size: 200,
+              color: color.withValues(alpha: 0.10),
+            ),
           ),
-          const SizedBox(height: 14),
-          if (_players.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 20),
-              child: Center(child: Text('No participants yet. Be the first to join!', style: TextStyle(color: PFColors.muted))),
-            )
-            else
-            ...List.generate(_players.length, (i) {
-              final p = _players[i];
-              final name = (p['name'] ?? 'Player').toString();
-              final isOrganizer = p['is_organizer'] == true || p['role'] == 'organizer';
-              return Container(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                decoration: BoxDecoration(
-                  border: i < _players.length - 1 ? Border(bottom: BorderSide(color: PFColors.border.withValues(alpha: 0.4))) : null,
-                ),
-                child: Row(
+          Padding(
+            padding: EdgeInsets.fromLTRB(20, topPad + 4, 20, 26),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
                   children: [
-                    CircleAvatar(
-                      radius: 16,
-                      backgroundColor: isOrganizer ? PFColors.accent.withValues(alpha: 0.2) : PFColors.cardSoft,
-                      child: Text(name[0].toUpperCase(), style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: isOrganizer ? PFColors.accent : PFColors.muted)),
+                    PFBadge(
+                      label: _sport.toUpperCase(),
+                      icon: PFSport.icon(_sport),
+                      color: color,
+                      solid: true,
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Text(name, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-                              if (isOrganizedByCurrentUser(p)) ...[
-                                const SizedBox(width: 6),
-                                const Text('(You)', style: TextStyle(fontSize: 12, color: PFColors.accent)),
-                              ],
-                            ],
-                          ),
-                          if (isOrganizer)
-                            const Text('Organizer', style: TextStyle(fontSize: 11, color: PFColors.accent)),
-                        ],
-                      ),
-                    ),
-                    if (isOrganizer)
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: PFColors.accent.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: const Text('HOST', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: PFColors.accent, letterSpacing: 0.8)),
-                      ),
+                    if (_skill != 'any') ...[
+                      const SizedBox(width: PFSpacing.sm),
+                      PFBadge(label: _skill.toUpperCase(), color: PFColors.secondary),
+                    ],
+                    const Spacer(),
+                    _statusBadge(),
                   ],
                 ),
-              );
-            }),
+                const SizedBox(height: 18),
+                Text(_title, style: Theme.of(context).textTheme.displaySmall),
+                const SizedBox(height: 14),
+                Wrap(
+                  spacing: 16,
+                  runSpacing: 6,
+                  children: [
+                    _metaChip(Icons.calendar_today_rounded, prettyDate(_dateTime)),
+                    if (_location.isNotEmpty) _metaChip(Icons.place_outlined, _location),
+                  ],
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildBottomBar() {
-    final max = _match?['max_players'] ?? 10;
-    final current = _match?['current_players'] ?? 0;
-    final spots = _match?['spots_left'] ?? (max - current);
-    final price = _match?['price'] ?? 0;
-    final isFull = spots <= 0;
+  Widget _metaChip(IconData icon, String text) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 14, color: PFColors.textSecondary),
+        const SizedBox(width: 6),
+        Text(text, style: Theme.of(context).textTheme.bodyMedium),
+      ],
+    );
+  }
 
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [PFColors.background.withValues(alpha: 0), PFColors.background],
-        ),
-      ),
-      child: SafeArea(
-        top: false,
-        child: Row(
-          children: [
-            Expanded(
-              flex: 2,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    price is num && price == 0 ? 'Free Entry' : 'Br ${price}',
-                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: PFColors.accent),
-                  ),
-                  Text(
-                    isFull ? 'No spots available' : '$spots spot${spots == 1 ? '' : 's'} left',
-                    style: TextStyle(fontSize: 12, color: isFull ? Colors.red : PFColors.muted),
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              flex: 3,
-              child: _isOrganizer
-                  ? PFButton(
-                      label: 'Submit Result',
-                      onTap: _showSubmitResultSheet,
-                    )
-                  : PFButton(
-                      label: isFull ? 'Join Waitlist' : 'Join Match',
-                      onTap: isFull ? () {} : _join,
-                    ),
-            ),
-          ],
-        ),
+  Widget _statusBadge() {
+    final isFull = _spots <= 0;
+    return PFBadge(
+      label: isFull ? 'FULL' : '$_spots SPOTS LEFT',
+      color: isFull ? PFColors.danger : PFColors.primary,
+    );
+  }
+
+  Widget _stats() {
+    final price = double.tryParse(_match?['price']?.toString() ?? '0') ?? 0;
+    final priceText = price == 0 ? 'Free' : 'Br ${price.toStringAsFixed(0)}';
+    return PFCard(
+      child: Row(
+        children: [
+          _stat('PLAYERS', '$_current/$_max'),
+          _vdiv(),
+          _stat('PRICE', priceText, primary: true),
+          _vdiv(),
+          _stat('SPOTS LEFT', '$_spots', danger: _spots <= 0),
+        ],
       ),
     );
   }
 
-  String _formatDate(String dateTimeStr) {
-    final dt = DateTime.tryParse(dateTimeStr);
-    if (dt == null) return dateTimeStr;
-    final now = DateTime.now();
-    final diff = dt.difference(now);
-    if (diff.inDays == 0) return 'Today, ${_formatTime(dt)}';
-    if (diff.inDays == 1) return 'Tomorrow, ${_formatTime(dt)}';
-    return '${dt.day}/${dt.month}/${dt.year}, ${_formatTime(dt)}';
+  Widget _stat(String label, String value, {bool primary = false, bool danger = false}) {
+    return Expanded(
+      child: Column(
+        children: [
+          Text(label, style: Theme.of(context).textTheme.labelSmall),
+          const SizedBox(height: 6),
+          Text(value,
+              style: PFType.number.copyWith(
+                fontSize: 20,
+                color: danger
+                    ? PFColors.danger
+                    : (primary ? PFColors.primary : PFColors.text),
+              )),
+        ],
+      ),
+    );
   }
 
-  String _formatTime(DateTime dt) {
-    final hour = dt.hour > 12 ? dt.hour - 12 : (dt.hour == 0 ? 12 : dt.hour);
-    final period = dt.hour >= 12 ? 'PM' : 'AM';
-    return '$hour:${dt.minute.toString().padLeft(2, '0')} $period';
+  Widget _vdiv() => Container(
+        width: 1,
+        height: 38,
+        margin: const EdgeInsets.symmetric(horizontal: 4),
+        color: PFColors.hairline,
+      );
+
+  Widget _descriptionCard() {
+    return PFCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('ABOUT', style: Theme.of(context).textTheme.labelSmall),
+          const SizedBox(height: 8),
+          Text(_description, style: Theme.of(context).textTheme.bodyLarge),
+        ],
+      ),
+    );
   }
 
-  bool isOrganizedByCurrentUser(Map<String, dynamic> p) {
-    return p['is_current_user'] == true;
+  Widget _organizerCard() {
+    return PFCard(
+      raised: true,
+      child: Row(
+        children: [
+          PFAvatar(name: _organizer, size: 40),
+          const SizedBox(width: PFSpacing.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Organized by', style: Theme.of(context).textTheme.labelSmall),
+                const SizedBox(height: 2),
+                Text(_organizer, style: Theme.of(context).textTheme.titleSmall),
+              ],
+            ),
+          ),
+          const Icon(Icons.verified_rounded, color: PFColors.primary, size: 18),
+        ],
+      ),
+    );
   }
 
-  IconData _sportIcon(String sport) {
-    final s = sport.toLowerCase();
-    if (s.contains('soccer') || s.contains('football')) return Icons.sports_soccer_rounded;
-    if (s.contains('basketball')) return Icons.sports_basketball_rounded;
-    if (s.contains('tennis')) return Icons.sports_tennis_rounded;
-    if (s.contains('volleyball')) return Icons.sports_volleyball_rounded;
-    if (s.contains('baseball')) return Icons.sports_baseball_rounded;
-    return Icons.sports_rounded;
+  Widget _lineup() {
+    if (_players.isEmpty) {
+      return PFCard(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Text('No one has joined yet. Be the first.',
+              style: Theme.of(context).textTheme.bodySmall),
+        ),
+      );
+    }
+    return PFCard(
+      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 12),
+      child: Column(
+        children: [
+          for (int i = 0; i < _players.length; i++) ...[
+            _playerRow(_players[i]),
+            if (i < _players.length - 1)
+              const Divider(height: 1, indent: 52, color: PFColors.hairline),
+          ],
+        ],
+      ),
+    );
   }
 
-  List<Color> _sportGradient(String sport) {
-    final s = sport.toLowerCase();
-    if (s.contains('soccer') || s.contains('football')) return const [Color(0xFF1A3A1A), Color(0xFF0D1F0D)];
-    if (s.contains('basketball')) return const [Color(0xFF3A1A1A), Color(0xFF1F0D0D)];
-    if (s.contains('tennis')) return const [Color(0xFF2A3A1A), Color(0xFF141F0D)];
-    return const [Color(0xFF1A2A3A), Color(0xFF0D141F)];
+  Widget _playerRow(Map<String, dynamic> p) {
+    final name = (p['name'] ?? 'Player').toString();
+    final isHost = p['is_organizer'] == true;
+    final isMe = p['id'] == widget.session.user?['id'];
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          PFAvatar(name: name, size: 38),
+          const SizedBox(width: PFSpacing.md),
+          Expanded(
+            child: Text(name,
+                style: Theme.of(context).textTheme.titleSmall,
+                overflow: TextOverflow.ellipsis),
+          ),
+          if (isMe) ...[
+            const PFBadge(label: 'YOU', color: PFColors.secondary),
+            const SizedBox(width: 6),
+          ],
+          if (isHost) const PFBadge(label: 'HOST', color: PFColors.primary),
+        ],
+      ),
+    );
+  }
+
+  Widget _bottomBar() {
+    final price = double.tryParse(_match?['price']?.toString() ?? '0') ?? 0;
+    final priceText = price == 0 ? 'Free' : 'Br ${price.toStringAsFixed(0)}';
+    final isFull = _spots <= 0;
+    return Container(
+      decoration: const BoxDecoration(
+        color: PFColors.surface,
+        border: Border(top: BorderSide(color: PFColors.hairline)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+          child: Row(
+            children: [
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(priceText,
+                      style: PFType.number.copyWith(
+                          fontSize: 20, color: PFColors.primary)),
+                  const SizedBox(height: 2),
+                  Text(
+                    isFull
+                        ? 'No spots available'
+                        : '$_spots spot${_spots == 1 ? '' : 's'} left',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+              ),
+              const SizedBox(width: PFSpacing.lg),
+              Expanded(
+                child: _isOrganizer
+                    ? PFButton(
+                        label: 'Submit result',
+                        icon: Icons.emoji_events_outlined,
+                        onTap: _showSubmitResultSheet,
+                      )
+                    : PFButton(
+                        label: isFull ? 'Waitlist' : 'Join match',
+                        icon: isFull ? null : Icons.add_rounded,
+                        onTap: isFull ? null : _join,
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }

@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.example" "\0"
-            VALUE "FileDescription", "lets_play_app" "\0"
+            VALUE "CompanyName", "com.vyro.app" "\0"
+            VALUE "FileDescription", "vyro" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "lets_play_app" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.example. All rights reserved." "\0"
-            VALUE "OriginalFilename", "lets_play_app.exe" "\0"
-            VALUE "ProductName", "lets_play_app" "\0"
+            VALUE "InternalName", "vyro" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 com.vyro.app. All rights reserved." "\0"
+            VALUE "OriginalFilename", "vyro.exe" "\0"
+            VALUE "ProductName", "vyro" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

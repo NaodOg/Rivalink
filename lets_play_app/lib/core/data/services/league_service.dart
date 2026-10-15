@@ -1,15 +1,11 @@
 import 'dart:convert';
-import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import '../api_config.dart';
 import 'cache_service.dart';
 
 class LeagueService {
-  static String get _baseUrl {
-    if (Platform.isAndroid) {
-      return 'https://unpossessively-pseudonational-shawnta.ngrok-free.dev/api';
-    }
-    return 'https://unpossessively-pseudonational-shawnta.ngrok-free.dev/api';
-  }
+  static String get _baseUrl => ApiConfig.baseUrl;
 
   static Future<Map<String, String>> _getHeaders(String token) async {
     return {
@@ -43,7 +39,7 @@ class LeagueService {
       }
       return [];
     } catch (e) {
-      print('Error fetching leagues: $e');
+      debugPrint('Error fetching leagues: $e');
       final cached = await CacheService.getCachedData('${CacheService.leaguesKey}_all');
       if (cached != null) {
         return List<Map<String, dynamic>>.from(cached as List);
@@ -66,7 +62,7 @@ class LeagueService {
       }
       return [];
     } catch (e) {
-      print('Error fetching my leagues: $e');
+      debugPrint('Error fetching my leagues: $e');
       return [];
     }
   }

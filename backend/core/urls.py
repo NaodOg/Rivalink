@@ -8,18 +8,24 @@ from .views import (
     leave_match, cancel_match, get_match_history,
     get_notifications, mark_notifications_read, search_matches,
     get_match_chat, send_match_chat, get_team_chat, send_team_chat, edit_match,
-    get_leagues, get_my_leagues, create_league, join_league, get_league_details,
+    get_leagues, get_my_leagues, create_league, edit_league, delete_league, join_league, get_league_details,
     match_ratings, user_ratings, match_result, get_user_stats,
     manage_favorites, check_favorite, get_match_recommendations,
     get_conversations, get_messages,
     create_referee_profile, get_referee_profile, list_referees,
     book_referee, list_referee_bookings, update_booking_status, rate_referee,
-    create_venue, list_venues, get_venue, get_my_venues, update_venue,
+    create_venue, list_venues, get_venue, get_my_venues, update_venue, delete_venue,
     book_venue, get_venue_bookings, update_venue_booking, rate_venue,
     upload_profile_image,
-    create_tournament, list_tournaments, get_tournament, get_my_tournaments,
+    create_tournament, list_tournaments, get_tournament, get_my_tournaments, edit_tournament, delete_tournament,
     register_team_tournament, start_tournament, update_match_result,
-    get_individual_rankings, get_team_rankings, get_user_elo
+    get_individual_rankings, get_team_rankings, get_user_elo, get_user_form,
+    create_report, toggle_block, register_device, unregister_device, run_reminders,
+    social_me, follow_toggle, list_following, list_followers, list_teammates, list_referrals,
+    send_phone_code, verify_phone, phone_status
+)
+from .payment_views import (
+    initialize_premium_payment, payment_webhook, payment_status, get_my_payments
 )
 
 urlpatterns = [
@@ -59,6 +65,8 @@ urlpatterns = [
     path('leagues/', get_leagues, name='get_leagues'),
     path('leagues/my/', get_my_leagues, name='get_my_leagues'),
     path('leagues/create/', create_league, name='create_league'),
+    path('leagues/<int:league_id>/edit/', edit_league, name='edit_league'),
+    path('leagues/<int:league_id>/delete/', delete_league, name='delete_league'),
     path('leagues/join/', join_league, name='join_league'),
     path('leagues/<int:league_id>/', get_league_details, name='get_league_details'),
     path('matches/<int:match_id>/ratings/', match_ratings, name='match_ratings'),
@@ -84,6 +92,7 @@ urlpatterns = [
     path('venues/my/', get_my_venues, name='get_my_venues'),
     path('venues/<int:venue_id>/', get_venue, name='get_venue'),
     path('venues/<int:venue_id>/update/', update_venue, name='update_venue'),
+    path('venues/<int:venue_id>/delete/', delete_venue, name='delete_venue'),
     path('venues/<int:venue_id>/rate/', rate_venue, name='rate_venue'),
     path('venues/book/', book_venue, name='book_venue'),
     path('venues/bookings/', get_venue_bookings, name='get_venue_bookings'),
@@ -92,6 +101,8 @@ urlpatterns = [
     path('tournaments/', list_tournaments, name='list_tournaments'),
     path('tournaments/my/', get_my_tournaments, name='get_my_tournaments'),
     path('tournaments/create/', create_tournament, name='create_tournament'),
+    path('tournaments/<int:tournament_id>/edit/', edit_tournament, name='edit_tournament'),
+    path('tournaments/<int:tournament_id>/delete/', delete_tournament, name='delete_tournament'),
     path('tournaments/<int:tournament_id>/', get_tournament, name='get_tournament'),
     path('tournaments/<int:tournament_id>/start/', start_tournament, name='start_tournament'),
     path('tournaments/register/', register_team_tournament, name='register_team_tournament'),
@@ -100,5 +111,29 @@ urlpatterns = [
     path('rankings/individual/', get_individual_rankings, name='get_individual_rankings'),
     path('rankings/teams/', get_team_rankings, name='get_team_rankings'),
     path('rankings/user/<int:user_id>/', get_user_elo, name='get_user_elo'),
+    path('users/<int:user_id>/form/', get_user_form, name='get_user_form'),
+    # Trust & safety
+    path('reports/create/', create_report, name='create_report'),
+    path('blocks/toggle/', toggle_block, name='toggle_block'),
+    # Push devices + reminders
+    path('devices/register/', register_device, name='register_device'),
+    path('devices/unregister/', unregister_device, name='unregister_device'),
+    path('tasks/run-reminders/', run_reminders, name='run_reminders'),
+    # Social graph
+    path('social/me/', social_me, name='social_me'),
+    path('social/follow/', follow_toggle, name='follow_toggle'),
+    path('social/following/', list_following, name='list_following'),
+    path('social/followers/', list_followers, name='list_followers'),
+    path('social/teammates/', list_teammates, name='list_teammates'),
+    path('social/referrals/', list_referrals, name='list_referrals'),
+    # Phone verification
+    path('auth/phone/send-code/', send_phone_code, name='send_phone_code'),
+    path('auth/phone/verify/', verify_phone, name='verify_phone'),
+    path('auth/phone/status/', phone_status, name='phone_status'),
+    # Payment endpoints
+    path('payments/initialize/', initialize_premium_payment, name='initialize_premium_payment'),
+    path('payments/webhook/', payment_webhook, name='payment_webhook'),
+    path('payments/status/', payment_status, name='payment_status'),
+    path('payments/history/', get_my_payments, name='get_my_payments'),
 ]
 

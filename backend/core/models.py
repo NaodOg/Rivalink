@@ -1,5 +1,14 @@
 from django.db import models
 from django.contrib.auth.models import User
+from django.utils import timezone
+import secrets
+
+
+def _generate_referral_code():
+    while True:
+        code = secrets.token_hex(3).upper()
+        if not UserProfile.objects.filter(referral_code=code).exists():
+            return code
 
 class UserProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
@@ -8,8 +17,24 @@ class UserProfile(models.Model):
     favorite_sports = models.CharField(max_length=200, blank=True, default='')
     bio = models.TextField(blank=True, default='')
     location = models.CharField(max_length=200, blank=True, default='')
+    is_premium = models.BooleanField(default=False)
+    premium_expires = models.DateTimeField(null=True, blank=True)
+    phone_verified = models.BooleanField(default=False)
+    phone_code = models.CharField(max_length=6, blank=True, default='')
+    phone_code_expires = models.DateTimeField(null=True, blank=True)
+    no_show_count = models.IntegerField(default=0)
+    referral_code = models.CharField(max_length=12, unique=True, null=True, blank=True)
+    referral_credit = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    @property
+    def premium_active(self):
+        if not self.is_premium:
+            return False
+        if self.premium_expires and self.premium_expires < timezone.now():
+            return False
+        return True
 
     def __str__(self):
         return f"{self.user.username}'s profile"
@@ -17,6 +42,9 @@ class UserProfile(models.Model):
     @staticmethod
     def get_or_create_for_user(user):
         profile, created = UserProfile.objects.get_or_create(user=user)
+        if not profile.referral_code:
+            profile.referral_code = _generate_referral_code()
+            profile.save(update_fields=['referral_code'])
         return profile
 
 
@@ -102,11 +130,28 @@ class Match(models.Model):
     max_players = models.IntegerField(default=10)
     current_players = models.IntegerField(default=0)
     price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    skill_level = models.CharField(
+        max_length=20,
+        choices=[
+            ('any', 'Any level'),
+            ('beginner', 'Beginner'),
+            ('intermediate', 'Intermediate'),
+            ('advanced', 'Advanced'),
+        ],
+        default='any',
+    )
     organizer = models.ForeignKey(User, on_delete=models.CASCADE, related_name='organized_matches')
     team = models.ForeignKey(Team, on_delete=models.SET_NULL, null=True, blank=True, related_name='matches')
     is_active = models.BooleanField(default=True)
+    reminder_sent = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['date_time']),
+            models.Index(fields=['is_active']),
+        ]
 
     def __str__(self):
         return f"{self.title} - {self.sport}"
@@ -122,6 +167,30 @@ class MatchParticipant(models.Model):
         unique_together = ('match', 'user')
 
 
+class MatchWaitlist(models.Model):
+    match = models.ForeignKey(Match, on_delete=models.CASCADE, related_name='waitlist')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='match_waitlists')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('match', 'user')
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f"{self.user.username} waiting for {self.match.title}"
+
+
+class DeviceToken(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='device_tokens')
+    token = models.CharField(max_length=500, unique=True)
+    device_type = models.CharField(max_length=20, default='android')
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.user.username} ({self.device_type})"
+
+
 class Notification(models.Model):
     TYPE_CHOICES = [
         ('match_joined', 'Player Joined Match'),
@@ -131,6 +200,7 @@ class Notification(models.Model):
         ('team_chat_message', 'Team Chat Message'),
         ('team_joined', 'Player Joined Team'),
         ('team_left', 'Player Left Team'),
+        ('waitlist_promoted', 'Waitlist Promoted'),
         ('general', 'General'),
     ]
 
@@ -145,6 +215,9 @@ class Notification(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', 'is_read']),
+        ]
 
     def __str__(self):
         return f"{self.title} -> {self.user.username}"
@@ -189,6 +262,12 @@ class League(models.Model):
     organizer = models.ForeignKey(User, on_delete=models.CASCADE, related_name='organized_leagues')
     location = models.CharField(max_length=200, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['start_date']),
+            models.Index(fields=['sport', 'is_active']),
+        ]
 
     def __str__(self):
         return f"{self.name} ({self.sport})"
@@ -243,7 +322,7 @@ class PlayerRating(models.Model):
         unique_together = ('match', 'rater', 'rated_user')
 
     def __str__(self):
-        return f"Result for {self.match.title}: {self.score}"
+        return f"{self.rater.username} rated {self.rated_user.username} {self.rating}/5"
 
 
 class Favorite(models.Model):
@@ -279,10 +358,10 @@ class MatchResult(models.Model):
     match = models.OneToOneField(Match, on_delete=models.CASCADE, related_name='result')
     match_type = models.CharField(max_length=20, choices=MATCH_TYPE_CHOICES, default='pickup')
     result_type = models.CharField(max_length=20, choices=RESULT_TYPE_CHOICES, default='individual')
-    winner_team_id = models.IntegerField(null=True, blank=True)
-    winner_user_id = models.IntegerField(null=True, blank=True)
+    winner_team = models.ForeignKey(Team, on_delete=models.SET_NULL, null=True, blank=True, related_name='winner_results')
+    winner_user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='winner_results')
     winning_group = models.CharField(max_length=10, blank=True, default='')
-    mvp_user_id = models.IntegerField(null=True, blank=True)  # For pickup matches
+    mvp_user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='mvp_results')
     score = models.CharField(max_length=50, blank=True)
     notes = models.TextField(blank=True)
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
@@ -505,6 +584,12 @@ class Tournament(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        indexes = [
+            models.Index(fields=['status']),
+            models.Index(fields=['start_date']),
+        ]
+
     def __str__(self):
         return f"{self.name} ({self.get_format_display()})"
 
@@ -638,3 +723,92 @@ class TeamRanking(models.Model):
 
     def __str__(self):
         return f"{self.team.name} ({self.sport}): {self.points} pts"
+
+
+class Payment(models.Model):
+    PAYMENT_TYPES = [
+        ('premium', 'Premium Subscription'),
+        ('venue_booking', 'Venue Booking'),
+    ]
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('success', 'Success'),
+        ('failed', 'Failed'),
+    ]
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='payments')
+    tx_ref = models.CharField(max_length=100, unique=True)
+    chapa_tx_id = models.CharField(max_length=100, blank=True, default='')
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    currency = models.CharField(max_length=10, default='ETB')
+    payment_type = models.CharField(max_length=20, choices=PAYMENT_TYPES)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    description = models.CharField(max_length=500, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.user.username} - {self.payment_type} - {self.status} ({self.tx_ref})"
+
+
+class Report(models.Model):
+    CATEGORY_CHOICES = [
+        ('spam', 'Spam'),
+        ('abuse', 'Abuse'),
+        ('no_show', 'No-show'),
+        ('cheating', 'Cheating'),
+        ('other', 'Other'),
+    ]
+    STATUS_CHOICES = [
+        ('open', 'Open'),
+        ('reviewed', 'Reviewed'),
+        ('dismissed', 'Dismissed'),
+    ]
+
+    reporter = models.ForeignKey(User, on_delete=models.CASCADE, related_name='reports_made')
+    target_user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name='reports_received', null=True, blank=True)
+    match = models.ForeignKey(Match, on_delete=models.SET_NULL, null=True, blank=True)
+    category = models.CharField(max_length=30, choices=CATEGORY_CHOICES, default='other')
+    details = models.TextField(blank=True, default='')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.reporter.username} -> {self.category} ({self.status})"
+
+
+class Block(models.Model):
+    blocker = models.ForeignKey(User, on_delete=models.CASCADE, related_name='blocks_made')
+    blocked = models.ForeignKey(User, on_delete=models.CASCADE, related_name='blocks_received')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('blocker', 'blocked')
+
+    def __str__(self):
+        return f"{self.blocker.username} blocked {self.blocked.username}"
+
+
+class Follow(models.Model):
+    follower = models.ForeignKey(User, on_delete=models.CASCADE, related_name='following_set')
+    following = models.ForeignKey(User, on_delete=models.CASCADE, related_name='followers_set')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('follower', 'following')
+
+    def __str__(self):
+        return f"{self.follower.username} → {self.following.username}"
+
+
+class Referral(models.Model):
+    referrer = models.ForeignKey(User, on_delete=models.CASCADE, related_name='referrals_made')
+    referred = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='referral_source')
+    code = models.CharField(max_length=12)
+    credit = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.referrer.username} referred {self.referred.username if self.referred else '—'}"

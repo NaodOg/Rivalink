@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../core/theme/playfair_theme.dart';
+import '../../core/theme/rivalink_theme.dart';
 
 class FilterChipsRow extends StatelessWidget {
   final List<String> labels;
@@ -17,31 +17,18 @@ class FilterChipsRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 40,
+      height: 42,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: labels.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        separatorBuilder: (_, __) => const SizedBox(width: PFSpacing.sm),
         itemBuilder: (_, i) {
           final label = labels[i];
-          final active = selected == label;
-          return GestureDetector(
-            onTap: () => onSelected(label),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              decoration: BoxDecoration(
-                color: active ? PFColors.accent : PFColors.card,
-                borderRadius: BorderRadius.circular(999),
-                border: Border.all(color: active ? PFColors.accent : PFColors.border),
-              ),
-              child: Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: active ? PFColors.background : PFColors.text,
-                ),
-              ),
+          return Center(
+            child: ChoiceChip(
+              label: Text(label),
+              selected: selected == label,
+              onSelected: (_) => onSelected(label),
             ),
           );
         },

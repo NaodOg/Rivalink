@@ -1,7 +1,9 @@
 import 'dart:convert';
-import 'dart:io';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
+import '../api_config.dart';
+import 'auth_service.dart';
+import 'cache_service.dart';
+import 'upload_media_type.dart';
 
 class Venue {
   final int id;
@@ -170,17 +172,12 @@ class VenueBooking {
 }
 
 class VenueService {
-  static String get _baseUrl {
-    if (Platform.isAndroid) {
-      return 'https://unpossessively-pseudonational-shawnta.ngrok-free.dev/api';
-    }
-    return 'https://unpossessively-pseudonational-shawnta.ngrok-free.dev/api';
-  }
+  static String get _baseUrl => ApiConfig.baseUrl;
 
   static Future<Map<String, String>?> _getAuth() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
+      final session = await AuthService.getSession();
+      final token = session?['token'] as String?;
       if (token == null) return null;
       return {
         'Content-Type': 'application/json',
@@ -192,6 +189,7 @@ class VenueService {
   }
 
   static Future<List<Venue>> getVenues({String? sport, String? city, bool availableOnly = true}) async {
+    final cacheKey = '${CacheService.venuesKey}_$availableOnly';
     try {
       String url = '$_baseUrl/venues/?available=${availableOnly.toString()}';
       if (sport != null && sport.isNotEmpty) {
@@ -201,23 +199,32 @@ class VenueService {
         url += '&city=$city';
       }
 
-      final response = await http.get(Uri.parse(url));
+      final response = await http.get(Uri.parse(url)).timeout(ApiConfig.httpTimeout);
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         final List<dynamic> venuesJson = data['venues'] ?? [];
+        await CacheService.setCachedData(cacheKey, venuesJson, cacheMinutes: 10);
         return venuesJson.map((v) => Venue.fromJson(v)).toList();
       }
-      return [];
+      return _cachedVenues(cacheKey);
     } catch (e) {
-      print('Error fetching venues: $e');
-      return [];
+      // Offline-first: fall back to the last good response.
+      return _cachedVenues(cacheKey);
     }
+  }
+
+  static Future<List<Venue>> _cachedVenues(String key) async {
+    final cached = await CacheService.getCachedData(key);
+    if (cached is List) {
+      return cached.map((v) => Venue.fromJson(v as Map<String, dynamic>)).toList();
+    }
+    return [];
   }
 
   static Future<Venue?> getVenue(int venueId) async {
     try {
-      final response = await http.get(Uri.parse('$_baseUrl/venues/$venueId/'));
+      final response = await http.get(Uri.parse('$_baseUrl/venues/$venueId/')).timeout(ApiConfig.httpTimeout);
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
@@ -225,7 +232,6 @@ class VenueService {
       }
       return null;
     } catch (e) {
-      print('Error fetching venue: $e');
       return null;
     }
   }
@@ -238,7 +244,7 @@ class VenueService {
       final response = await http.get(
         Uri.parse('$_baseUrl/venues/my/'),
         headers: headers,
-      );
+      ).timeout(ApiConfig.httpTimeout);
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
@@ -247,7 +253,6 @@ class VenueService {
       }
       return [];
     } catch (e) {
-      print('Error fetching my venues: $e');
       return [];
     }
   }
@@ -266,12 +271,12 @@ class VenueService {
     String? imagePath,
   }) async {
     try {
-      final auth = await _getAuth();
-      if (auth == null) return {'success': false, 'error': 'Not logged in'};
-      final token = auth['Authorization']?.replaceFirst('Token ', '');
+      final session = await AuthService.getSession();
+      final token = session?['token'] as String?;
+      if (token == null) return {'success': false, 'error': 'Not logged in'};
 
       final request = http.MultipartRequest('POST', Uri.parse('$_baseUrl/venues/create/'));
-      request.headers['Authorization'] = auth['Authorization'] ?? '';
+      request.headers['Authorization'] = 'Token $token';
 
       request.fields['name'] = name;
       request.fields['address'] = address;
@@ -283,13 +288,12 @@ class VenueService {
       if (amenities.isNotEmpty) request.fields['amenities'] = amenities;
       if (openingTime != null) request.fields['opening_time'] = openingTime;
       if (closingTime != null) request.fields['closing_time'] = closingTime;
-      if (token != null) request.fields['token'] = token;
 
       if (imagePath != null) {
-        request.files.add(await http.MultipartFile.fromPath('image', imagePath));
+        request.files.add(await http.MultipartFile.fromPath('image', imagePath, contentType: imageMediaType(imagePath)));
       }
 
-      final streamed = await request.send();
+      final streamed = await request.send().timeout(ApiConfig.httpTimeout);
       final response = await http.Response.fromStream(streamed);
       final dynamic data = json.decode(response.body);
 
@@ -309,7 +313,7 @@ class VenueService {
       }
       return {'success': false, 'error': errMsg ?? 'Failed'};
     } catch (e) {
-      return {'success': false, 'error': 'Connection error: $e'};
+      return {'success': false, 'error': 'Connection error'};
     }
   }
 
@@ -344,7 +348,7 @@ class VenueService {
         Uri.parse('$_baseUrl/venues/$venueId/update/'),
         headers: headers,
         body: json.encode(body),
-      );
+      ).timeout(ApiConfig.httpTimeout);
 
       final data = json.decode(response.body);
 
@@ -356,7 +360,7 @@ class VenueService {
       }
       return {'success': false, 'error': data['error'] ?? 'Failed'};
     } catch (e) {
-      return {'success': false, 'error': 'Connection error: $e'};
+      return {'success': false, 'error': 'Connection error'};
     }
   }
 
@@ -383,7 +387,7 @@ class VenueService {
           'match_id': matchId,
           'notes': notes,
         }),
-      );
+      ).timeout(ApiConfig.httpTimeout);
 
       final data = json.decode(response.body);
 
@@ -395,7 +399,7 @@ class VenueService {
       }
       return {'success': false, 'error': data['error'] ?? 'Failed'};
     } catch (e) {
-      return {'success': false, 'error': 'Connection error: $e'};
+      return {'success': false, 'error': 'Connection error'};
     }
   }
 
@@ -409,7 +413,7 @@ class VenueService {
       final response = await http.get(
         Uri.parse(url),
         headers: headers,
-      );
+      ).timeout(ApiConfig.httpTimeout);
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
@@ -418,7 +422,6 @@ class VenueService {
       }
       return [];
     } catch (e) {
-      print('Error fetching bookings: $e');
       return [];
     }
   }
@@ -435,7 +438,7 @@ class VenueService {
         Uri.parse('$_baseUrl/venues/bookings/$bookingId/'),
         headers: headers,
         body: json.encode({'status': status}),
-      );
+      ).timeout(ApiConfig.httpTimeout);
 
       final data = json.decode(response.body);
 
@@ -447,7 +450,7 @@ class VenueService {
       }
       return {'success': false, 'error': data['error'] ?? 'Failed'};
     } catch (e) {
-      return {'success': false, 'error': 'Connection error: $e'};
+      return {'success': false, 'error': 'Connection error'};
     }
   }
 
@@ -467,7 +470,7 @@ class VenueService {
           'rating': rating,
           'comment': comment,
         }),
-      );
+      ).timeout(ApiConfig.httpTimeout);
 
       final data = json.decode(response.body);
 
@@ -476,7 +479,7 @@ class VenueService {
       }
       return {'success': false, 'error': data['error'] ?? 'Failed'};
     } catch (e) {
-      return {'success': false, 'error': 'Connection error: $e'};
+      return {'success': false, 'error': 'Connection error'};
     }
   }
 }

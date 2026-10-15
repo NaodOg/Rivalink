@@ -3,8 +3,10 @@ import 'package:flutter/material.dart';
 import '../../core/data/repositories/app_repository.dart';
 import '../../core/data/services/ranking_service.dart';
 import '../../core/state/session_controller.dart';
-import '../../core/theme/playfair_theme.dart';
+import '../../core/theme/rivalink_theme.dart';
 import '../widgets/pf_card.dart';
+import '../widgets/pf_empty_state.dart';
+import '../widgets/pf_segmented.dart';
 
 class RankingScreen extends StatefulWidget {
   final SessionController session;
@@ -21,7 +23,14 @@ class _RankingScreenState extends State<RankingScreen> {
   List<Map<String, dynamic>> _rankings = [];
   bool _loading = true;
 
-  final _sports = ['', 'soccer', 'basketball', 'tennis', 'volleyball', 'badminton'];
+  static const _sports = [
+    ('', 'All'),
+    ('soccer', 'Soccer'),
+    ('basketball', 'Basketball'),
+    ('tennis', 'Tennis'),
+    ('volleyball', 'Volleyball'),
+    ('badminton', 'Badminton'),
+  ];
 
   @override
   void initState() {
@@ -34,12 +43,11 @@ class _RankingScreenState extends State<RankingScreen> {
     if (token == null) return;
     setState(() => _loading = true);
     try {
-      Map<String, dynamic> result;
-      if (_tab == 0) {
-        result = await RankingService.getIndividualRankings(token: token, sport: _sport.isEmpty ? null : _sport);
-      } else {
-        result = await RankingService.getTeamRankings(token: token, sport: _sport.isEmpty ? null : _sport);
-      }
+      final result = _tab == 0
+          ? await RankingService.getIndividualRankings(
+              token: token, sport: _sport.isEmpty ? null : _sport)
+          : await RankingService.getTeamRankings(
+              token: token, sport: _sport.isEmpty ? null : _sport);
       if (!mounted) return;
       final raw = result['rankings'] as List<dynamic>? ?? [];
       setState(() {
@@ -48,7 +56,10 @@ class _RankingScreenState extends State<RankingScreen> {
       });
     } catch (_) {
       if (!mounted) return;
-      setState(() => _loading = false);
+      setState(() {
+        _loading = false;
+        _rankings = [];
+      });
     }
   }
 
@@ -58,88 +69,71 @@ class _RankingScreenState extends State<RankingScreen> {
       child: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-            child: Row(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Expanded(
-                  child: Text('Rankings', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800)),
-                ),
-                Container(
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: PFColors.card,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Row(
-                    children: [
-                      _ToggleChip(label: 'Individual', selected: _tab == 0, onTap: () => setState(() { _tab = 0; _load(); })),
-                      _ToggleChip(label: 'Teams', selected: _tab == 1, onTap: () => setState(() { _tab = 1; _load(); })),
-                    ],
-                  ),
+                Text('Rankings', style: Theme.of(context).textTheme.displaySmall),
+                const SizedBox(height: PFSpacing.lg),
+                PFSegmented(
+                  labels: const ['Individual', 'Teams'],
+                  index: _tab,
+                  onChanged: (i) {
+                    setState(() => _tab = i);
+                    _load();
+                  },
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 8),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: PFColors.card,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: PFColors.border),
+          const SizedBox(height: PFSpacing.md),
+          SizedBox(
+            height: 42,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              itemCount: _sports.length,
+              separatorBuilder: (_, __) => const SizedBox(width: PFSpacing.sm),
+              itemBuilder: (_, i) {
+                final (code, label) = _sports[i];
+                return Center(
+                  child: ChoiceChip(
+                    label: Text(label),
+                    selected: _sport == code,
+                    onSelected: (_) {
+                      setState(() => _sport = code);
+                      _load();
+                    },
                   ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<String>(
-                      value: _sport,
-                      dropdownColor: PFColors.card,
-                      items: [
-                        const DropdownMenuItem(value: '', child: Text('All Sports', style: TextStyle(color: PFColors.text, fontSize: 13))),
-                        ..._sports.where((s) => s.isNotEmpty).map((s) => DropdownMenuItem(
-                          value: s,
-                          child: Text(s[0].toUpperCase() + s.substring(1), style: const TextStyle(color: PFColors.text, fontSize: 13)),
-                        )),
-                      ],
-                      onChanged: (v) {
-                        if (v == null) return;
-                        setState(() => _sport = v);
-                        _load();
-                      },
-                    ),
-                  ),
-                ),
-                const Spacer(),
-                if (_rankings.isNotEmpty)
-                  Text('${_rankings.length} ${_rankings.length == 1 ? 'entry' : 'entries'}',
-                    style: const TextStyle(color: PFColors.muted, fontSize: 12)),
-              ],
+                );
+              },
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: PFSpacing.md),
           Expanded(
             child: RefreshIndicator(
               onRefresh: _load,
-              color: PFColors.accent,
+              color: PFColors.primary,
+              backgroundColor: PFColors.surfaceRaised,
               child: _loading
-                  ? const Center(child: CircularProgressIndicator(color: PFColors.accent))
+                  ? const Center(child: CircularProgressIndicator(color: PFColors.primary))
                   : _rankings.isEmpty
                       ? ListView(
                           children: const [
-                            SizedBox(height: 80),
-                            Center(child: Text('No rankings available yet.', style: TextStyle(color: PFColors.muted))),
+                            SizedBox(height: 40),
+                            PFEmptyState(
+                              icon: Icons.leaderboard_rounded,
+                              title: 'No rankings yet',
+                              message: 'Play premium matches to appear on the board.',
+                            ),
                           ],
                         )
                       : ListView.builder(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
                           itemCount: _rankings.length + 1,
                           itemBuilder: (context, i) {
-                            if (i == 0) return _buildHeader();
-                            final entry = _rankings[i - 1];
-                            return _buildRow(entry, i);
+                            if (i == 0) return _header();
+                            return _row(_rankings[i - 1], i);
                           },
                         ),
             ),
@@ -149,145 +143,90 @@ class _RankingScreenState extends State<RankingScreen> {
     );
   }
 
-  Widget _buildHeader() {
-    if (_tab == 0) {
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 4),
-        child: Row(
-          children: const [
-            SizedBox(width: 32, child: Text('#', style: TextStyle(color: PFColors.muted, fontSize: 11, fontWeight: FontWeight.w600))),
-            SizedBox(width: 8),
-            Expanded(child: Text('Player', style: TextStyle(color: PFColors.muted, fontSize: 11, fontWeight: FontWeight.w600))),
-            SizedBox(width: 48, child: Text('ELO', textAlign: TextAlign.right, style: TextStyle(color: PFColors.muted, fontSize: 11, fontWeight: FontWeight.w600))),
-            SizedBox(width: 64, child: Text('W/L/D', textAlign: TextAlign.right, style: TextStyle(color: PFColors.muted, fontSize: 11, fontWeight: FontWeight.w600))),
-          ],
-        ),
-      );
-    }
+  Widget _header() {
+    Widget cell(String t, {double? width, bool right = false}) => width != null
+        ? SizedBox(
+            width: width,
+            child: Text(t,
+                textAlign: right ? TextAlign.right : TextAlign.left,
+                style: Theme.of(context).textTheme.labelSmall))
+        : Expanded(
+            child: Text(t,
+                textAlign: right ? TextAlign.right : TextAlign.left,
+                style: Theme.of(context).textTheme.labelSmall));
     return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
+      padding: const EdgeInsets.only(bottom: PFSpacing.sm),
       child: Row(
-        children: const [
-          SizedBox(width: 32, child: Text('#', style: TextStyle(color: PFColors.muted, fontSize: 11, fontWeight: FontWeight.w600))),
-          SizedBox(width: 8),
-          Expanded(child: Text('Team', style: TextStyle(color: PFColors.muted, fontSize: 11, fontWeight: FontWeight.w600))),
-          SizedBox(width: 32, child: Text('Pts', textAlign: TextAlign.right, style: TextStyle(color: PFColors.muted, fontSize: 11, fontWeight: FontWeight.w600))),
-          SizedBox(width: 64, child: Text('W/L/D', textAlign: TextAlign.right, style: TextStyle(color: PFColors.muted, fontSize: 11, fontWeight: FontWeight.w600))),
+        children: [
+          cell('#', width: 30),
+          const SizedBox(width: 8),
+          cell(_tab == 0 ? 'PLAYER' : 'TEAM'),
+          if (_tab == 0) cell('ELO', width: 52, right: true),
+          if (_tab != 0) cell('PTS', width: 44, right: true),
+          cell('W/D/L', width: 64, right: true),
         ],
       ),
     );
   }
 
-  Widget _buildRow(Map<String, dynamic> entry, int rank) {
-    if (_tab == 0) {
-      final elo = entry['elo_rating'] ?? 1200;
-      final w = entry['wins'] ?? 0;
-      final l = entry['losses'] ?? 0;
-      final d = entry['draws'] ?? 0;
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 6),
-        child: PFCard(
-          child: Row(
-            children: [
-              SizedBox(
-                width: 32,
-                child: Text('$rank', style: TextStyle(
-                  fontSize: 14, fontWeight: FontWeight.w700,
-                  color: rank <= 3 ? PFColors.accent : PFColors.text,
-                )),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(entry['name']?.toString() ?? 'Unknown',
-                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              SizedBox(
-                width: 48,
-                child: Text('$elo', textAlign: TextAlign.right,
-                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: PFColors.accent)),
-              ),
-              SizedBox(
-                width: 64,
-                child: Text('$w/$l/$d', textAlign: TextAlign.right,
-                  style: const TextStyle(fontSize: 13, color: PFColors.muted)),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
+  Widget _row(Map<String, dynamic> e, int rank) {
+    final name = _tab == 0
+        ? (e['name']?.toString() ?? 'Unknown')
+        : (e['team_name']?.toString() ?? 'Unknown');
+    final primaryVal = _tab == 0 ? (e['elo_rating'] ?? 1200) : (e['points'] ?? 0);
+    final w = e['wins'] ?? 0;
+    final d = e['draws'] ?? 0;
+    final l = e['losses'] ?? 0;
 
-    final pts = entry['points'] ?? 0;
-    final w = entry['wins'] ?? 0;
-    final l = entry['losses'] ?? 0;
-    final d = entry['draws'] ?? 0;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.only(bottom: PFSpacing.sm),
       child: PFCard(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         child: Row(
           children: [
             SizedBox(
-              width: 32,
-              child: Text('$rank', style: TextStyle(
-                fontSize: 14, fontWeight: FontWeight.w700,
-                color: rank <= 3 ? PFColors.accent : PFColors.text,
-              )),
+              width: 30,
+              child: rank <= 3
+                  ? Icon(Icons.military_tech_rounded,
+                      size: 18, color: _medal(rank))
+                  : Text('$rank',
+                      style: PFType.number.copyWith(
+                          fontSize: 13, color: PFColors.textSecondary)),
             ),
             const SizedBox(width: 8),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(entry['team_name']?.toString() ?? 'Unknown',
-                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  if (entry['goal_difference'] != null)
-                    Text('GD: ${entry['goal_difference'] >= 0 ? '+' : ''}${entry['goal_difference']}',
-                      style: const TextStyle(fontSize: 11, color: PFColors.muted)),
-                ],
-              ),
+              child: Text(name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleSmall),
             ),
             SizedBox(
-              width: 32,
-              child: Text('$pts', textAlign: TextAlign.right,
-                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: PFColors.accent)),
+              width: _tab == 0 ? 52 : 44,
+              child: Text('$primaryVal',
+                  textAlign: TextAlign.right,
+                  style: PFType.number
+                      .copyWith(fontSize: 15, color: PFColors.primary)),
             ),
             SizedBox(
               width: 64,
-              child: Text('$w/$l/$d', textAlign: TextAlign.right,
-                style: const TextStyle(fontSize: 13, color: PFColors.muted)),
+              child: Text('$w/$d/$l',
+                  textAlign: TextAlign.right,
+                  style: TextStyle(fontSize: 12.5, color: PFColors.textSecondary)),
             ),
           ],
         ),
       ),
     );
   }
-}
 
-class _ToggleChip extends StatelessWidget {
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-  const _ToggleChip({required this.label, required this.selected, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-        decoration: BoxDecoration(
-          color: selected ? PFColors.accent : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Text(label, style: TextStyle(
-          fontSize: 12, fontWeight: FontWeight.w600,
-          color: selected ? PFColors.background : PFColors.muted,
-        )),
-      ),
-    );
+  Color _medal(int rank) {
+    switch (rank) {
+      case 1:
+        return const Color(0xFFF5C24B);
+      case 2:
+        return PFColors.textSecondary;
+      default:
+        return const Color(0xFFCD7F45);
+    }
   }
 }

@@ -2,8 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../../core/data/repositories/app_repository.dart';
 import '../../core/state/session_controller.dart';
-import '../../core/theme/playfair_theme.dart';
+import '../../core/theme/rivalink_theme.dart';
 import '../widgets/pf_card.dart';
+import '../widgets/pf_empty_state.dart';
 import '../widgets/pf_scaffold.dart';
 
 class NotificationsScreen extends StatefulWidget {
@@ -19,6 +20,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   List<dynamic> _items = [];
   int _unread = 0;
   bool _loading = true;
+  bool _error = false;
 
   @override
   void initState() {
@@ -29,17 +31,23 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   Future<void> _load() async {
     final token = widget.session.token;
     if (token == null) return;
-    final result = await widget.repo.getNotifications(token);
-    if (!mounted) return;
-    final items = List<dynamic>.from(result['notifications'] ?? []);
-    final unread = (result['unread_count'] ?? 0) as int;
-    setState(() {
-      _items = items;
-      _unread = unread;
-      _loading = false;
-    });
-    if (unread > 0) {
-      await widget.repo.markNotificationsRead(token);
+    setState(() { _loading = true; _error = false; });
+    try {
+      final result = await widget.repo.getNotifications(token);
+      if (!mounted) return;
+      final items = List<dynamic>.from(result['notifications'] ?? []);
+      final unread = (result['unread_count'] ?? 0) as int;
+      setState(() {
+        _items = items;
+        _unread = unread;
+        _loading = false;
+      });
+      if (unread > 0) {
+        await widget.repo.markNotificationsRead(token);
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() { _loading = false; _error = true; });
     }
   }
 
@@ -51,11 +59,21 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           icon: const Icon(Icons.arrow_back_ios_new_rounded),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Text('Notifications ($_unread)'),
+        title: const Text('Notifications'),
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator(color: PFColors.accent))
-          : ListView(
+          ? const Center(child: CircularProgressIndicator(color: PFColors.primary))
+          : _error
+              ? Center(
+                  child: PFEmptyState(
+                    icon: Icons.cloud_off_rounded,
+                    title: "Couldn't load notifications",
+                    message: 'Check your connection and try again.',
+                    actionLabel: 'Retry',
+                    onAction: _load,
+                  ),
+                )
+              : ListView(
               children: [
                 ..._items.map((n) {
                   final type = n['type']?.toString() ?? '';
@@ -90,11 +108,11 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                               ],
                             ),
                           ),
-                          if (!n['is_read'] == true)
+                          if (n['is_read'] != true)
                             Container(
                               margin: const EdgeInsets.only(top: 4),
                               width: 8, height: 8,
-                              decoration: const BoxDecoration(color: PFColors.accent, shape: BoxShape.circle),
+                              decoration: const BoxDecoration(color: PFColors.primary, shape: BoxShape.circle),
                             ),
                         ],
                       ),
@@ -102,9 +120,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                   );
                 }),
                 if (_items.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 40),
-                    child: Center(child: Text('No notifications yet', style: TextStyle(color: PFColors.muted))),
+                  const PFEmptyState(
+                    icon: Icons.notifications_none_rounded,
+                    title: 'No notifications yet',
+                    message: 'Match invites, results and chats show up here.',
                   ),
               ],
             ),

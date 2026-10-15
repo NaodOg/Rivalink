@@ -23,9 +23,17 @@ class AppRoutes {
 
   static const rankings = '/rankings';
   static const profile = '/profile';
+  static const friends = '/friends';
+  static const tournaments = '/tournaments';
+  static const tournamentDetails = '/tournament-details';
+  static const myVenues = '/my-venues';
+  static const myTeams = '/my-teams';
+  static const referees = '/referees';
+  static const phoneVerify = '/verify-phone';
   static const notifications = '/notifications';
   static const chat = '/chat';
   static const payments = '/payments';
+  static const subscription = '/subscription';
   static const settings = '/settings';
   static const editProfile = '/edit-profile';
 }

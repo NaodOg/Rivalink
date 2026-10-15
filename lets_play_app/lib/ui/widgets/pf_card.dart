@@ -1,31 +1,43 @@
 import 'package:flutter/material.dart';
 
-import '../../core/theme/playfair_theme.dart';
+import '../../core/theme/rivalink_theme.dart';
 
 class PFCard extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;
   final VoidCallback? onTap;
+  final bool raised;
+  final Color? color;
+  final EdgeInsetsGeometry? margin;
+  final double radius;
 
   const PFCard({
     super.key,
     required this.child,
-    this.padding = const EdgeInsets.all(14),
+    this.padding = const EdgeInsets.all(16),
     this.onTap,
+    this.raised = false,
+    this.color,
+    this.margin,
+    this.radius = PFRadius.lg,
   });
 
   @override
   Widget build(BuildContext context) {
-    final card = Container(
-      padding: padding,
-      decoration: BoxDecoration(
-        color: PFColors.card,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: PFColors.border),
+    final borderRadius = BorderRadius.circular(radius);
+    final content = Padding(padding: padding, child: child);
+    final card = Material(
+      color: color ?? (raised ? PFColors.surfaceRaised : PFColors.surface),
+      shape: RoundedRectangleBorder(
+        borderRadius: borderRadius,
+        side: const BorderSide(color: PFColors.border),
       ),
-      child: child,
+      clipBehavior: Clip.antiAlias,
+      child: onTap == null
+          ? content
+          : InkWell(onTap: onTap, child: content),
     );
-    if (onTap == null) return card;
-    return InkWell(borderRadius: BorderRadius.circular(18), onTap: onTap, child: card);
+    if (margin == null) return card;
+    return Padding(padding: margin!, child: card);
   }
 }

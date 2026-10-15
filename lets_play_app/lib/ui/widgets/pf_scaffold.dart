@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../core/theme/playfair_theme.dart';
+import '../../core/theme/rivalink_theme.dart';
 
 class PFScaffold extends StatelessWidget {
   final PreferredSizeWidget? appBar;
@@ -30,12 +30,12 @@ class PFScaffold extends StatelessWidget {
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: [Color(0xFF0E130E), PFColors.background],
+            colors: [PFColors.scrimTop, PFColors.background],
           ),
         ),
         child: SafeArea(
           child: Padding(
-            padding: padding ?? const EdgeInsets.symmetric(horizontal: 16),
+            padding: padding ?? const EdgeInsets.symmetric(horizontal: PFSpacing.lg),
             child: body,
           ),
         ),

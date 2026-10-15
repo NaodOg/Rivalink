@@ -13,21 +13,6 @@ def k_factor(matches_played):
         return K_FACTOR_NEW
     return K_FACTOR
 
-def update_elo(winner_rating, loser_rating, draw=False):
-    e_winner = expected_score(winner_rating, loser_rating)
-    e_loser = expected_score(loser_rating, winner_rating)
-
-    if draw:
-        s_winner = 0.5
-        s_loser = 0.5
-    else:
-        s_winner = 1.0
-        s_loser = 0.0
-
-    new_winner = round(winner_rating + k_factor(0) * (s_winner - e_winner))
-    new_loser = round(loser_rating + k_factor(0) * (s_loser - e_loser))
-    return new_winner, new_loser
-
 def update_elo_with_matches(winner_rating, loser_rating, winner_matches, loser_matches, draw=False):
     e_winner = expected_score(winner_rating, loser_rating)
     e_loser = expected_score(loser_rating, winner_rating)

@@ -1,15 +1,10 @@
 import 'dart:convert';
-import 'dart:io';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
+import '../api_config.dart';
+import 'auth_service.dart';
 
 class NotificationService {
-  static String get _baseUrl {
-    if (Platform.isAndroid) {
-      return 'https://unpossessively-pseudonational-shawnta.ngrok-free.dev/api';
-    }
-    return 'https://unpossessively-pseudonational-shawnta.ngrok-free.dev/api';
-  }
+  static String get _baseUrl => ApiConfig.baseUrl;
 
   static Future<Map<String, String>> _getHeaders(String token) async {
     return {
@@ -24,7 +19,7 @@ class NotificationService {
       final response = await http.get(
         Uri.parse('$_baseUrl/notifications/'),
         headers: headers,
-      );
+      ).timeout(ApiConfig.httpTimeout);
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
@@ -36,7 +31,6 @@ class NotificationService {
       }
       return {'success': false, 'notifications': [], 'unread_count': 0};
     } catch (e) {
-      print('Error fetching notifications: $e');
       return {'success': false, 'notifications': [], 'unread_count': 0};
     }
   }
@@ -56,7 +50,7 @@ class NotificationService {
         Uri.parse('$_baseUrl/notifications/read/'),
         headers: headers,
         body: json.encode(body),
-      );
+      ).timeout(ApiConfig.httpTimeout);
 
       final data = json.decode(response.body);
 
@@ -66,20 +60,16 @@ class NotificationService {
         return {'success': false, 'error': data['error'] ?? 'Failed to mark as read'};
       }
     } catch (e) {
-      return {'success': false, 'error': 'Connection error: $e'};
+      return {'success': false, 'error': 'Connection error'};
     }
   }
 
   static Future<Map<String, dynamic>?> getStoredSession() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final sessionJson = prefs.getString('session');
-      if (sessionJson != null) {
-        return json.decode(sessionJson);
-      }
+      final session = await AuthService.getSession();
+      return session;
     } catch (e) {
-      print('Error loading session: $e');
+      return null;
     }
-    return null;
   }
 }

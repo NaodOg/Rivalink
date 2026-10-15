@@ -1,4 +1,4 @@
-# lets_play_app
+# Rivalink
 
 A new Flutter project.
 

@@ -1,8 +1,8 @@
-# PlayFair - Sports Matchmaking Platform
+# Rivalink - Sports Matchmaking Platform
 
 ## Overview
 
-PlayFair is a full-stack sports matchmaking platform built with **Flutter** (mobile app) and **Django REST Framework** (backend). Users can organize and join matches, create and manage teams, participate in leagues with Elo/points ranking, chat with teammates and match participants, and track their performance.
+Rivalink is a full-stack sports matchmaking platform built with **Flutter** (mobile app) and **Django REST Framework** (backend). Users can organize and join matches, create and manage teams, participate in leagues with Elo/points ranking, chat with teammates and match participants, and track their performance.
 
 ---
 
@@ -73,7 +73,27 @@ PlayFair is a full-stack sports matchmaking platform built with **Flutter** (mob
     - Stats: matches played, wins, losses, teams owned, leagues joined, avg rating
     - Per-sport Elo ratings with W/L/D breakdown
 
-11. **Favorites**
+11. **Venue Management**
+    - Create, update, delete venues (name, description, sports, price, capacity, amenities, hours)
+    - Browse venues with sport/price/location filters
+    - Book venues by date/time slot
+    - View venue bookings and availability
+    - Rate venues
+
+12. **Tournament System**
+    - Create tournaments (name, sport, format, prize pool, entry fee, max teams)
+    - Edit and delete tournaments
+    - Register teams for tournaments
+    - Start tournaments with bracket generation
+    - Update tournament match results, auto-advance winners
+
+13. **Referee System**
+    - Create referee profiles with experience and certifications
+    - Browse available referees
+    - Book referees for matches
+    - Rate referees after booking
+
+14. **Favorites**
     - Favorite teams
     - View favorited teams
 
@@ -176,7 +196,7 @@ def join_league(request):
     
     if non_premium > 0:
         return Response({
-            'error': 'All team members need PlayFair Premium to join a league'
+            'error': 'All team members need Rivalink Premium to join a league'
         }, status=status.HTTP_402_PAYMENT_REQUIRED)
     
     # ... proceed with league join
@@ -218,27 +238,27 @@ def create_league(request):
 
 ## Brand Sponsorship Model
 
-### How PlayFair Makes Money from Brand Partnerships
+### How Rivalink Makes Money from Brand Partnerships
 
-Big brands (Fanta, Coca-Cola, Pepsi, banks, betting companies) have marketing budgets for community sports. They pay PlayFair to host branded leagues/tournaments — you get paid regardless of how many users are premium.
+Big brands (Fanta, Coca-Cola, Pepsi, banks, betting companies) have marketing budgets for community sports. They pay Rivalink to host branded leagues/tournaments — you get paid regardless of how many users are premium.
 
 ### Structure Options
 
-#### 1. Flat Sponsorship Fee (Best for PlayFair)
+#### 1. Flat Sponsorship Fee (Best for Rivalink)
 Brand pays a flat fee to run the league under their name. Prize pool is separate.
 
 | Item | Amount |
 |------|--------|
-| Brand pays PlayFair | **100,000 ETB** |
+| Brand pays Rivalink | **100,000 ETB** |
 | Prize pool (brand-funded) | 50,000 ETB |
-| PlayFair keeps | 100,000 ETB |
+| Rivalink keeps | 100,000 ETB |
 | 256 players wear branded jerseys for 8 weeks | — |
 
 #### 2. Management Fee (20-30% cut)
 | Item | Amount |
 |------|--------|
 | Brand total budget | 200,000 ETB |
-| PlayFair management fee | **50,000 ETB** (25%) |
+| Rivalink management fee | **50,000 ETB** (25%) |
 | Prize pool | 100,000 ETB |
 | Operations (referees, venue, equipment) | 50,000 ETB |
 
@@ -249,14 +269,14 @@ Teams pay entry, brand matches or tops up the prize pool.
 |------|--------|
 | 32 teams × 1,000 ETB entry | 32,000 ETB |
 | Brand prize top-up | 50,000 ETB |
-| PlayFair takes 15% of entry fees | 4,800 ETB |
+| Rivalink takes 15% of entry fees | 4,800 ETB |
 | Flat sponsorship fee | 30,000 ETB |
-| **Total to PlayFair** | **~35,000 ETB per season** |
+| **Total to Rivalink** | **~35,000 ETB per season** |
 
 ### Pitch Deck for Brands
 
 ```
-PLAYFAIR x [BRAND] LEAGUE
+Rivalink x [BRAND] LEAGUE
 
 Deliverables:
 - "[Brand] Premier League" branding across app (banners, match pages)
@@ -296,13 +316,11 @@ Brand sponsorships are the **real revenue multiplier** — one branded league ca
 
 ### 🔴 High Priority
 - **Premium subscription system** (payment integration, dynamic checks, upsell UI)
-- **Referee system** (profiles, booking, verification)
-- **Venue management** (owner accounts, listing, booking calendar)
 
 ### 🟡 Medium Priority
-- **Tournament system** (brackets, elimination, prize pools)
 - **Dispute resolution** (conflict process, refunds)
 - **Advertising system** (banners, sponsored content)
+- **Venue owner dashboard** (manage listings, view booking stats)
 
 ### 🟢 Low Priority
 - **Corporate event management**
@@ -311,24 +329,77 @@ Brand sponsorships are the **real revenue multiplier** — one branded league ca
 
 ---
 
+## Security Hardening
+
+### ✅ Rate Limiting
+| Throttle | Default (dev) | Production | Applied To |
+|----------|--------------|------------|------------|
+| `AuthRateThrottle` | 20/hr | 5/hr | signup, login |
+| `CreateRateThrottle` | 30/hr | 10/hr | create_team, create_match, create_tournament, etc. |
+| `SensitiveWriteThrottle` | 30/hr | 10/hr | match_result, book_venue, register_team_tournament, update_match_result, edit/delete league/tournament/venue, upload_profile_image |
+| Global `AnonRateThrottle` | 20/hr | 20/hr | All anonymous requests |
+| Global `UserRateThrottle` | 200/hr | 200/hr | All authenticated requests |
+
+Rates configurable via `.env`: `RATE_AUTH`, `RATE_CREATE`, `RATE_SENSITIVE`.
+
+### ✅ Input Validation & Sanitization (`core/validators.py`)
+- **Email**: RFC-like regex + max 254 chars
+- **Phone**: Ethiopian format `(+251|0)XXXXXXXXX`
+- **Password**: Min 8 chars, requires uppercase + lowercase + digit
+- **Strings**: Max-length enforcement per field (title: 200, description: 5000, etc.)
+- **Integers**: Range-bounded (max_players: 2-100, capacity: 0-100000, etc.)
+- **Decimals**: Range-bounded (entry_fee: 0-999999, price_per_hour: 0-999999)
+- **Enums**: Whitelist validation (sport, format, result type, team role, etc.)
+- **Dates**: ISO 8601 parsing with `validate_date_iso`
+- **Booleans**: Proper coercion via `validate_boolean`
+- **HTML/XSS**: `sanitize_text()` strips all HTML tags via Django's `strip_tags`
+- **Image uploads**: Extension check + MIME type + **magic byte verification** (JPEG/PNG/GIF/WebP) + 5MB size limit
+
+### ✅ Secure API Key Handling
+- **`SECRET_KEY`** loaded from `DJANGO_SECRET_KEY` env var via `python-dotenv`
+- **`.env`** gitignored — never committed to repo
+- **Production-only settings** enabled when `DEBUG=False`:
+  - `SESSION_COOKIE_SECURE`, `CSRF_COOKIE_SECURE` (HTTPS-only)
+  - `SECURE_BROWSER_XSS_FILTER`, `SECURE_CONTENT_TYPE_NOSNIFF`
+  - `SECURE_HSTS_SECONDS` (31536000), `SECURE_SSL_REDIRECT`
+  - `X_FRAME_OPTIONS = 'DENY'`
+  - JSON-only renderer (no browsable API)
+- **Proxy support**: `SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')` for ngrok/reverse proxy
+- **CSRF**: `CSRF_TRUSTED_ORIGINS` configurable via env var
+- **Database**: `DATABASE_URL` env var support via `dj-database-url` (falls back to SQLite)
+- **Upload limits**: `DATA_UPLOAD_MAX_MEMORY_SIZE` = 5MB, `FILE_UPLOAD_MAX_MEMORY_SIZE` = 5MB
+- **Field limits**: `DATA_UPLOAD_MAX_NUMBER_FIELDS` = 100
+- **Password validators**: Django built-in (min length 8, common password check, etc.)
+
+### ✅ Flutter Token Storage
+Auth tokens moved from `SharedPreferences` (plaintext) to `flutter_secure_storage` (Android Keystore / iOS Keychain).
+
+---
+
 ## Technical Stack
 
 ### Frontend (Flutter)
 - **Framework**: Flutter 3.x
-- **State Management**: setState + SessionController
-- **HTTP Client**: `http` package
-- **Storage**: `shared_preferences`
+- **State Management**: setState + SessionController with error state
+- **HTTP Client**: `http` package with timeout handling
+- **Storage**: `flutter_secure_storage` (auth tokens), `shared_preferences` (cache/onboarding)
 - **UI**: Material Design 3, `google_fonts`
+- **API Config**: Centralized `ApiConfig.baseUrl` — all services use a single configurable base URL
+- **Utilities**: `formatters.dart` (date/number formatting), `sport_utils.dart` (icons/gradients)
 
 ### Backend (Django)
-- **Framework**: Django 4.x + Django REST Framework
+- **Framework**: Django 6.x + Django REST Framework
 - **Authentication**: Token-based (DRF `Token` model)
-- **Database**: SQLite (dev) / PostgreSQL (prod ready)
+- **Rate Limiting**: DRF throttling — Auth (5/hr), Write (10/hr), Sensitive (10/hr)
+- **Database**: SQLite (dev) / PostgreSQL via `DATABASE_URL` env var (`dj-database-url`)
 - **CORS**: `django-cors-headers`
+- **Secrets**: `python-dotenv` — all keys from environment, `.env` gitignored
+- **Proxy**: `SECURE_PROXY_SSL_HEADER` configured for ngrok/reverse proxy
+- **Image Validation**: Magic byte verification for uploads (JPEG/PNG/GIF/WebP)
 
 ### Infrastructure (Dev)
 - **Tunnel**: ngrok for development
-- **API URL**: `https://unpossessively-pseudonational-shawnta.ngrok-free.dev`
+- **API URL**: Configurable via `ApiConfig.baseUrl` in Flutter, ngrok URL set in `.env`
 
 ---
 
@@ -364,7 +435,7 @@ Brand sponsorships are the **real revenue multiplier** — one branded league ca
 | **Nginx + Let's Encrypt** | Reverse proxy, static files, HTTPS (auto-renewing) | Free |
 | **Gunicorn** | Production WSGI server for Django | Free |
 | **Cloudinary (free tier)** | Image hosting, offloads Django from serving files | Free |
-| **Domain** | e.g. `api.playfair.et` | ~$3/yr |
+| **Domain** | e.g. `api.Rivalink.et` | ~$3/yr |
 | **VPS** | Hetzner CX22 | $5/mo |
 | **Total monthly** | | **~$10/mo (580 ETB)** |
 
@@ -384,19 +455,23 @@ Brand sponsorships are the **real revenue multiplier** — one branded league ca
 ## Project Structure
 
 ```
-PlayFair/
+Rivalink/
 ├── backend/
 │   ├── core/
 │   │   ├── models.py          # Django models (User, Match, Team, League, etc.)
 │   │   ├── views.py           # All API endpoints
 │   │   ├── urls.py            # URL routing
 │   │   ├── elo.py             # Elo calculation utility
+│   │   ├── validators.py      # Input validation, sanitization, throttle classes
 │   │   └── migrations/        # DB migrations (0022 latest)
-│   ├── letsplay_backend/
-│   │   └── settings.py        # Django settings
+│   ├── Rivalink_backend/
+│   │   └── settings.py        # Django settings (env-based config)
 │   ├── db.sqlite3             # SQLite database
+│   ├── .env                   # Environment variables (gitignored)
+│   ├── .gitignore
+│   ├── requirements.txt
 │   └── manage.py
-├── lets_play_app/
+├── Rivalink/
 │   ├── lib/
 │   │   ├── main.dart
 │   │   ├── core/
@@ -406,8 +481,8 @@ PlayFair/
 │   │   │   │   └── services/      # API service classes
 │   │   │   ├── navigation/        # AppRoutes
 │   │   │   ├── state/             # SessionController
-│   │   │   ├── theme/             # PlayFairTheme
-│   │   │   └── utils/             # Formatters
+│   │   │   ├── theme/             # RivalinkTheme
+│   │   │   └── utils/             # Formatters, sport_utils
 │   │   └── ui/
 │   │       ├── screens/           # All screens
 │   │       └── widgets/           # Reusable widgets
@@ -427,16 +502,31 @@ PlayFair/
 ### Backend Setup
 ```bash
 cd backend
+cp .env.example .env       # Create env file (or use existing .env)
+python -m pip install -r requirements.txt
 python manage.py runserver
 # In separate terminal:
 ngrok http 8000
-# Update ngrok URL in service files if it changes
+# Update ngrok URL in backend .env and Flutter ApiConfig.baseUrl if it changes
 ```
+
+### Environment Variables
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `DJANGO_SECRET_KEY` | Yes | — | Django secret key |
+| `DEBUG` | No | `False` | Debug mode |
+| `ALLOWED_HOSTS` | No | `localhost,127.0.0.1` | Comma-separated allowed hosts |
+| `CORS_ALLOWED_ORIGINS` | No | — | Comma-separated CORS origins |
+| `CSRF_TRUSTED_ORIGINS` | No | — | Comma-separated trusted origins |
+| `DATABASE_URL` | No | SQLite | PostgreSQL connection string |
+| `RATE_AUTH` | No | `5/hour` | Auth rate limit |
+| `RATE_CREATE` | No | `10/hour` | Create rate limit |
+| `RATE_SENSITIVE` | No | `10/hour` | Sensitive write rate limit |
 
 ### Flutter App
 ```bash
-cd lets_play_app
-flutter run -d RRCX202YH1P
+cd Rivalink
+flutter run -d <device-id>
 # Or build + install without re-login:
 flutter build apk --debug
 adb install -r build/app/outputs/flutter-apk/app-debug.apk
