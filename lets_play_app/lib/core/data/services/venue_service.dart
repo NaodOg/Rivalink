@@ -16,7 +16,7 @@ class Venue {
   final String location;
   final List<String> sports;
   final String sportsString;
-  final double pricePerHour;
+  final double slotPrice;
   final int capacity;
   final List<String> amenities;
   final String amenitiesString;
@@ -43,7 +43,7 @@ class Venue {
     required this.location,
     required this.sports,
     required this.sportsString,
-    required this.pricePerHour,
+    required this.slotPrice,
     required this.capacity,
     required this.amenities,
     required this.amenitiesString,
@@ -94,7 +94,7 @@ class Venue {
       location: json['location']?.toString() ?? '',
       sports: _toStrList(json['sports']),
       sportsString: json['sports_string']?.toString() ?? '',
-      pricePerHour: _toDouble(json['price_per_hour']),
+      slotPrice: _toDouble(json['slot_price']),
       capacity: _toInt(json['capacity']),
       amenities: _toStrList(json['amenities']),
       amenitiesString: json['amenities_string']?.toString() ?? '',
@@ -263,7 +263,7 @@ class VenueService {
     required String city,
     String description = '',
     String sports = '',
-    double pricePerHour = 0,
+    double slotPrice = 0,
     int capacity = 0,
     String amenities = '',
     String? openingTime,
@@ -283,7 +283,7 @@ class VenueService {
       request.fields['city'] = city;
       if (description.isNotEmpty) request.fields['description'] = description;
       if (sports.isNotEmpty) request.fields['sports'] = sports;
-      request.fields['price_per_hour'] = pricePerHour.toString();
+      request.fields['slot_price'] = slotPrice.toString();
       request.fields['capacity'] = capacity.toString();
       if (amenities.isNotEmpty) request.fields['amenities'] = amenities;
       if (openingTime != null) request.fields['opening_time'] = openingTime;
@@ -324,7 +324,7 @@ class VenueService {
     String? address,
     String? city,
     String? sports,
-    double? pricePerHour,
+    double? slotPrice,
     int? capacity,
     String? amenities,
     bool? isAvailable,
@@ -339,7 +339,7 @@ class VenueService {
       if (address != null) body['address'] = address;
       if (city != null) body['city'] = city;
       if (sports != null) body['sports'] = sports;
-      if (pricePerHour != null) body['price_per_hour'] = pricePerHour;
+      if (slotPrice != null) body['slot_price'] = slotPrice;
       if (capacity != null) body['capacity'] = capacity;
       if (amenities != null) body['amenities'] = amenities;
       if (isAvailable != null) body['is_available'] = isAvailable;

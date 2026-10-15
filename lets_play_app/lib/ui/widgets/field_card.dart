@@ -69,7 +69,7 @@ class FieldCard extends StatelessWidget {
                         style: const TextStyle(color: PFColors.textSecondary, fontSize: 12)),
                     const SizedBox(height: 5),
                     Text(
-                      'Br ${venue.pricePerHour.toStringAsFixed(0)}/hr',
+                      'Br ${venue.slotPrice.toStringAsFixed(0)}/2h',
                       style: const TextStyle(
                         color: PFColors.primary, fontSize: 12.5, fontWeight: FontWeight.w700),
                     ),

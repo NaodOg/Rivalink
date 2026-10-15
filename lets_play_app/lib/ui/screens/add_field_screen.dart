@@ -71,7 +71,7 @@ class _AddFieldScreenState extends State<AddFieldScreen> {
       city: _cityCtrl.text.trim(),
       location: _locationCtrl.text.trim(),
       sports: _sportsCtrl.text.trim(),
-      pricePerHour: double.tryParse(_priceCtrl.text) ?? 0,
+      slotPrice: double.tryParse(_priceCtrl.text) ?? 0,
       capacity: int.tryParse(_capacityCtrl.text) ?? 0,
       amenities: _amenitiesCtrl.text.trim(),
       openingTime: _openingCtrl.text.trim(),
@@ -142,7 +142,7 @@ class _AddFieldScreenState extends State<AddFieldScreen> {
                 Row(
                   children: [
                     Expanded(
-                        child: _field('Price (Br/hr)', _priceCtrl, '1500',
+                        child: _field('Price (Br / 2-hour slot)', _priceCtrl, '2000',
                             keyboard: TextInputType.number)),
                     const SizedBox(width: PFSpacing.md),
                     Expanded(

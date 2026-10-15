@@ -238,7 +238,7 @@ class _VenueDashboardScreenState extends State<VenueDashboardScreen> {
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.titleSmall),
                 const SizedBox(height: 2),
-                Text('${v.city} · Br ${v.pricePerHour.toStringAsFixed(0)}/hr',
+                Text('${v.city} · Br ${v.slotPrice.toStringAsFixed(0)}/2h',
                     style: Theme.of(context).textTheme.bodySmall),
               ],
             ),

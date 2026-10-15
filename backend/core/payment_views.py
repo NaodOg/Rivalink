@@ -10,10 +10,11 @@ from rest_framework import status
 from django.utils import timezone
 from datetime import timedelta
 from .models import UserProfile, Payment
+from .monetization import PREMIUM_PRICE_ETB as PREMIUM_AMOUNT, record_transaction
+from .audit import log_event
 
 CHAPA_API_URL = "https://api.chapa.co/v1/transaction/initialize"
 CHAPA_VERIFY_URL = "https://api.chapa.co/v1/transaction/verify/"
-PREMIUM_AMOUNT = Decimal("100.00")
 
 
 def _get_chapa_key():
@@ -60,7 +61,7 @@ def initialize_premium_payment(request):
     if not chapa_secret:
         return Response({'success': False, 'message': 'Payment system not configured'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    tx_ref = f"VYRO-{uuid.uuid4().hex[:12].upper()}"
+    tx_ref = f"RIVALINK-{uuid.uuid4().hex[:12].upper()}"
 
     email = user.email
     if not email:
@@ -72,7 +73,7 @@ def initialize_premium_payment(request):
         amount=PREMIUM_AMOUNT,
         currency='ETB',
         payment_type='premium',
-        description='VYRO Premium Subscription - 1 month',
+        description='Rivalink Premium Subscription - 1 month',
     )
 
     return_url = request.data.get('return_url', '')
@@ -85,7 +86,7 @@ def initialize_premium_payment(request):
         "callback_url": f"{settings.SITE_URL}/api/payments/webhook/",
         "return_url": return_url,
         "customization": {
-            "title": "VYRO Premium",
+            "title": "Rivalink Premium",
             "description": "Premium Subscription - 100 ETB/month",
         }
     }
@@ -125,6 +126,7 @@ def initialize_premium_payment(request):
 def payment_webhook(request):
     signature_valid = _verify_chapa_signature(request)
     if signature_valid is False:
+        log_event(request, 'payment_webhook', None, 'invalid_signature')
         return Response({'status': 'invalid_signature'}, status=status.HTTP_401_UNAUTHORIZED)
 
     tx_ref = request.data.get('tx_ref') or request.data.get('transaction_id', '')
@@ -172,6 +174,13 @@ def payment_webhook(request):
         profile.premium_expires = timezone.now() + timedelta(days=30)
         profile.save()
 
+        record_transaction(
+            'premium', PREMIUM_AMOUNT, payer=payment.user,
+            reference_type='payment', reference_id=payment.id,
+            status='collected', note='Premium subscription (1 month)',
+        )
+
+        log_event(request, 'payment_webhook', payment.user, 'ok', f'premium activated tx={tx_ref}')
         return Response({'status': 'success', 'message': 'Premium activated'})
 
     # Chapa's verification API is down: only accept the body when its HMAC
@@ -185,10 +194,18 @@ def payment_webhook(request):
         profile.premium_expires = timezone.now() + timedelta(days=30)
         profile.save()
 
+        record_transaction(
+            'premium', PREMIUM_AMOUNT, payer=payment.user,
+            reference_type='payment', reference_id=payment.id,
+            status='collected', note='Premium subscription (1 month)',
+        )
+
+        log_event(request, 'payment_webhook', payment.user, 'ok', f'premium activated tx={tx_ref}')
         return Response({'status': 'success', 'message': 'Premium activated'})
 
     payment.status = 'failed'
     payment.save()
+    log_event(request, 'payment_webhook', payment.user, 'failed', tx_ref)
     return Response({'status': 'failed', 'message': 'Payment not successful'})
 
 

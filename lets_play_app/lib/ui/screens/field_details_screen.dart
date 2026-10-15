@@ -66,8 +66,8 @@ class _FieldDetailsScreenState extends State<FieldDetailsScreen> {
     final result = await widget.repo.bookField(
       venueId: venue.id,
       date: DateTime.now().add(const Duration(days: 1)).toIso8601String().split('T').first,
-      start: slot?['start_time']?.toString() ?? '17:00',
-      end: slot?['end_time']?.toString() ?? '18:00',
+          start: slot?['start_time']?.toString() ?? '17:00',
+          end: slot?['end_time']?.toString() ?? '19:00',
     );
     if (!mounted) return;
     final ok = result['success'] == true;
@@ -182,9 +182,9 @@ class _FieldDetailsScreenState extends State<FieldDetailsScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('HOURLY RATE', style: Theme.of(context).textTheme.labelSmall),
+                Text('2-HOUR SLOT', style: Theme.of(context).textTheme.labelSmall),
                 const SizedBox(height: 6),
-                Text('Br ${venue.pricePerHour.toStringAsFixed(0)}',
+                Text('Br ${venue.slotPrice.toStringAsFixed(0)}',
                     style: PFType.number.copyWith(fontSize: 22, color: PFColors.primary)),
               ],
             ),
@@ -223,9 +223,9 @@ class _FieldDetailsScreenState extends State<FieldDetailsScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Br ${venue.pricePerHour.toStringAsFixed(0)}/hr',
+                  Text('Br ${venue.slotPrice.toStringAsFixed(0)}/2h',
                       style: PFType.number.copyWith(fontSize: 18, color: PFColors.primary)),
-                  Text('per hour', style: Theme.of(context).textTheme.bodySmall),
+                  Text('2-hour slot', style: Theme.of(context).textTheme.bodySmall),
                 ],
               ),
               const SizedBox(width: PFSpacing.lg),

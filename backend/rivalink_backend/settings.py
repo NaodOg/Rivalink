@@ -23,6 +23,8 @@ REMINDER_SECRET = os.getenv('REMINDER_SECRET', '')
 SMS_API_KEY = os.getenv('SMS_API_KEY', '')
 SMS_PROVIDER_URL = os.getenv('SMS_PROVIDER_URL', '')
 SITE_URL = os.getenv('SITE_URL', 'http://localhost:8000')
+ADMIN_URL = os.getenv('ADMIN_URL', 'admin/')
+TOKEN_TTL_DAYS = int(os.getenv('TOKEN_TTL_DAYS', '30') or 0)
 
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
@@ -123,7 +125,7 @@ CORS_ALLOW_HEADERS = [
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework.authentication.TokenAuthentication',
+        'core.auth.ExpiringTokenAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
@@ -166,5 +168,20 @@ if not DEBUG:
 DATA_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024
 FILE_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024
 DATA_UPLOAD_MAX_NUMBER_FIELDS = 100
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'simple': {'format': '%(asctime)s %(levelname)s %(name)s %(message)s'},
+    },
+    'handlers': {
+        'console': {'class': 'logging.StreamHandler', 'formatter': 'simple'},
+    },
+    'loggers': {
+        'rivalink.security': {'handlers': ['console'], 'level': 'INFO', 'propagate': False},
+        'django.request': {'handlers': ['console'], 'level': 'WARNING', 'propagate': False},
+    },
+}
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'

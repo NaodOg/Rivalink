@@ -169,7 +169,7 @@ def venue_to_dict(venue):
         'location': venue.location,
         'sports': venue.sport_list,
         'sports_string': venue.sports,
-        'price_per_hour': float(venue.price_per_hour),
+        'slot_price': float(venue.slot_price),
         'capacity': venue.capacity,
         'amenities': venue.amenities_list,
         'amenities_string': venue.amenities,

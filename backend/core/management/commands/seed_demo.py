@@ -1,4 +1,4 @@
-"""Seed demo data for VYRO/VYRO so the app has something to show.
+"""Seed demo data for Rivalink/Rivalink so the app has something to show.
 
 Idempotent-ish: objects are looked up by name and reused. Safe to run twice.
     python manage.py seed_demo
@@ -32,12 +32,12 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         now = timezone.now()
-        me = User.objects.filter(email='naodog00@gmail.com').first() or self._user('demo@vyro.app', 'Naod')
+        me = User.objects.filter(email='naodog00@gmail.com').first() or self._user('demo@Rivalink.app', 'Naod')
         UserProfile.get_or_create_for_user(me)
 
         names = [('Abe', 'K'), ('Sara', 'T'), ('Dawit', 'M'), ('Hana', 'G'),
                  ('Yonas', 'B'), ('Liya', 'A'), ('Kebede', 'W'), ('Marta', 'D')]
-        players = [self._user(f'demo{i}@vyro.app', f, l) for i, (f, l) in enumerate(names, 1)]
+        players = [self._user(f'demo{i}@Rivalink.app', f, l) for i, (f, l) in enumerate(names, 1)]
 
         # ── Teams ──
         team_names = ['Unity FC', 'Bole Ballers', 'CMC United', 'Sarbet Stars',
@@ -118,7 +118,7 @@ class Command(BaseCommand):
 
         # ── Tournament with a real bracket ──
         tournament, created = Tournament.objects.get_or_create(
-            name='VYRO Champions Cup',
+            name='Rivalink Champions Cup',
             defaults={'sport': 'soccer', 'format': 'single_elimination', 'max_teams': 8,
                       'current_teams': 8, 'entry_fee': 1000, 'prize_pool': '1st Br 20,000 · 2nd Br 8,000',
                       'rounds': 3, 'status': 'live', 'start_date': now + timedelta(days=3),
@@ -145,16 +145,17 @@ class Command(BaseCommand):
             _check_tournament_complete(tournament)
 
         # ── Venues + bookings (for the owner dashboard) ──
+        # price is per 2-hour slot
         venue_specs = [
-            ('Bole Turf Arena', 'Bole', 'soccer', 1500, 40),
-            ('CMC Sports Park', 'CMC', 'multiple', 1200, 60),
+            ('Bole Turf Arena', 'Bole', 'soccer', 2000, 40),
+            ('CMC Sports Park', 'CMC', 'multiple', 1800, 60),
         ]
         for vname, city, sport, price, cap in venue_specs:
             v, created = Venue.objects.get_or_create(
                 name=vname,
                 defaults={'owner': me, 'city': city, 'address': f'{city} Road',
                           'description': 'Floodlit pitch with changing rooms.',
-                          'sports': sport, 'price_per_hour': price, 'capacity': cap,
+                          'sports': sport, 'slot_price': price, 'capacity': cap,
                           'amenities': 'Parking, Floodlights, Locker rooms',
                           'opening_time': '06:00', 'closing_time': '22:00',
                           'is_available': True, 'verification_status': 'verified',
@@ -168,7 +169,7 @@ class Command(BaseCommand):
 
         # ── Referees + a booking ──
         for i, s in enumerate(['soccer', 'basketball']):
-            ru = self._user(f'ref{i}@vyro.app', 'Ref', f'#{i + 1}')
+            ru = self._user(f'ref{i}@Rivalink.app', 'Ref', f'#{i + 1}')
             ref, _ = Referee.objects.get_or_create(
                 user=ru,
                 defaults={'sports': s, 'experience_years': 5 + i, 'certification': 'National',

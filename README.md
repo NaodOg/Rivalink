@@ -99,6 +99,74 @@ Rivalink is a full-stack sports matchmaking platform built with **Flutter** (mob
 
 ---
 
+## 💰 Business Model — How Rivalink Makes Money
+
+> All prices in **ETB**. Rates live in `backend/core/monetization.py` and every
+> fee is written to the `PlatformTransaction` ledger.
+
+### The 5 wallets
+1. **Players** — micro-fees + Premium
+2. **Hosts / organizers** — per-match host fee
+3. **Venues** — booking commission
+4. **Referees** — booking commission
+5. **Brands** — branded leagues + ads (the biggest cheques)
+
+### Revenue streams (turn on in this order)
+
+| # | Stream | Rate / Price | Example |
+|---|--------|--------------|---------|
+| 1 | **Venue booking commission** | 10% of booking | Pitch **Br 2,000 / 2-hour slot** → **Br 200** |
+| 2 | **Host fee** (free users) | Br 20 / hosted match | 1,500 hosts/mo → **Br 30,000/mo** |
+| 3 | **Premium subscription** | **Br 100 / month** | 500 subscribers → **Br 50,000/mo** |
+| 4 | **Referee commission** | 10% of referee fee | Referee Br 500 → **Br 50** |
+| 5 | **Tournament entry cut** | 12% of entry fee | 16 teams × Br 1,500 = Br 24,000 → **Br 2,880** |
+| 6 | Featured / boosted venue listing | Br 1,500–3,000 / mo | 8 venues → **Br 16,000/mo** |
+| 7 | **Branded league sponsorship** | Br 100,000–300,000 / season | 1 deal → **Br 150,000** |
+| 8 | In-app ads / sponsored placement | Br 20,000–50,000 / mo | — |
+| 9 | Payment take rate (Chapa/Telebirr) | 1–2% | — |
+| 10 | Merch / kit drops | 20–30% margin | — |
+
+### ✅ Implemented (transactional)
+
+- `PlatformTransaction` ledger — `kind`, `amount`, `currency`, `payer`, `reference`, `status`, `note`
+- Venues are booked in **2-hour slots** (minimum 2 hours — nobody books a single hour)
+- **Venue booking → 10% commission** recorded on every booking
+- **Host fee Br 20** recorded on every hosted match (Premium hosts exempt)
+- **Referee booking → 10% commission**
+- **Tournament registration → 12% entry cut**
+- **Premium Br 100/mo** recorded on a successful Chapa webhook
+- Endpoints: `GET /api/revenue/summary/` (staff only), `GET /api/revenue/me/`
+
+### Worked projection — 5,000 monthly users
+
+| Stream | Math | ETB/mo |
+|---|---|---|
+| Venue commission | 2,000 × Br 2,000 × 10% | 400,000 |
+| Premium (10% pay) | 500 × Br 100 | 50,000 |
+| Host fees | 1,500 × Br 20 | 30,000 |
+| Referee commission | 300 × Br 500 × 10% | 15,000 |
+| Featured listings | 8 × Br 2,000 | 16,000 |
+| Tournaments | 4 × Br 24,000 × 12% | 11,520 |
+| Brand league (1/mo) | flat | 150,000 |
+| **Total** | | **≈ Br 672,520/mo** |
+
+Brand money + venue commission ≈ **82%** of revenue — subscriptions alone are ~Br 50k.
+
+### Ethiopia-specific notes
+- **Payments**: integrate **Chapa** (aggregates Telebirr, CBE Birr, M-PESA, cards). Cards are rare — mobile money is king. Payouts to venues/referees via Telebirr.
+- **Cash economy**: many venues take cash → offer **"pay at venue" + a small prepaid booking fee (Br 20–50)** to hold the slot.
+- **Price sensitivity**: micro-fees (Br 10–30) beat big subscriptions. Keep Premium at Br 100.
+- **Disintermediation**: players/venues will try to cut the platform out — beat it with matchmaking, Elo/rankings, verified venues, no-show protection, dispute handling.
+- **Taxes**: budget **15% VAT** (if VAT-registered) or **2% turnover tax** (small business).
+
+### What to start with
+1. **Venue booking commission** — earns on day one, tied to value delivered
+2. **Premium** (Br 100/mo — already wired)
+3. **Referee + tournament cuts** — flows already exist
+4. **Brand leagues** — once you can show traction numbers
+
+---
+
 ## Premium Subscription System
 
 ### 🆓 Free Tier
@@ -114,7 +182,7 @@ Rivalink is a full-stack sports matchmaking platform built with **Flutter** (mob
 | Match chat | ✅ Yes |
 | View rankings | ✅ Can browse |
 
-### 💎 Premium (~50-100 ETB/mo)
+### 💎 Premium (Br 100/mo)
 | Feature | Benefit |
 |---------|---------|
 | Host matches | Unlimited |
@@ -348,7 +416,7 @@ Rates configurable via `.env`: `RATE_AUTH`, `RATE_CREATE`, `RATE_SENSITIVE`.
 - **Password**: Min 8 chars, requires uppercase + lowercase + digit
 - **Strings**: Max-length enforcement per field (title: 200, description: 5000, etc.)
 - **Integers**: Range-bounded (max_players: 2-100, capacity: 0-100000, etc.)
-- **Decimals**: Range-bounded (entry_fee: 0-999999, price_per_hour: 0-999999)
+- **Decimals**: Range-bounded (entry_fee: 0-999999, slot_price: 0-999999)
 - **Enums**: Whitelist validation (sport, format, result type, team role, etc.)
 - **Dates**: ISO 8601 parsing with `validate_date_iso`
 - **Booleans**: Proper coercion via `validate_boolean`
@@ -373,6 +441,30 @@ Rates configurable via `.env`: `RATE_AUTH`, `RATE_CREATE`, `RATE_SENSITIVE`.
 
 ### ✅ Flutter Token Storage
 Auth tokens moved from `SharedPreferences` (plaintext) to `flutter_secure_storage` (Android Keystore / iOS Keychain).
+
+### ✅ Token Expiry & Rotation
+- `ExpiringTokenAuthentication` (`core/auth.py`) — tokens expire after **30 days** (`TOKEN_TTL_DAYS`; `0` disables)
+- **Change password** (`POST /api/auth/password/change/`) verifies the current password and **rotates the token** → all other devices are signed out
+- **Log out all devices** (`POST /api/auth/logout-all/`) invalidates the token everywhere
+
+### ✅ Audit Logging
+- `AuditLog` model (`core/models.py`) + `core/audit.py` — records user, action, status, IP, user-agent
+- Wired into: **login** (ok/failed), **signup**, **logout**, **password change**, **logout-all**, **password reset**, and the **payment webhook** (including **invalid-signature** attempts)
+- Structured logging via the `rivalink.security` logger
+
+### ✅ Password Reset (secure)
+- `POST /api/auth/password/reset/request/` — always returns a **generic** response (no email enumeration); issues a `secrets`-based 6-digit code with a **30-minute expiry**, delivered by SMS
+- `POST /api/auth/password/reset/confirm/` — constant-time comparison, throttled (5/hr), invalidates all sessions on success
+
+### ✅ Enumeration & Admin Hardening
+- Signup returns a **generic** error (no "email already exists" leak)
+- Admin path is env-configurable (`ADMIN_URL`, default `admin/`)
+- **Dependabot** configured for pip + pub + GitHub Actions (`.github/dependabot.yml`)
+
+### 🔜 Known gaps (deferred)
+- **SMS/OTP hardening** — throttle `send_phone_code`, validate the phone, `secrets`-based codes (deferred until SMS is live)
+- **Media signed URLs** — profile/venue images are currently public-by-URL
+- **FCM HTTP v1** — push still uses the legacy server key
 
 ---
 
@@ -522,10 +614,18 @@ ngrok http 8000
 | `RATE_AUTH` | No | `5/hour` | Auth rate limit |
 | `RATE_CREATE` | No | `10/hour` | Create rate limit |
 | `RATE_SENSITIVE` | No | `10/hour` | Sensitive write rate limit |
+| `TOKEN_TTL_DAYS` | No | `30` | Auth token lifetime in days (`0` = never expires) |
+| `ADMIN_URL` | No | `admin/` | Admin path (change it to obscure `/admin/`) |
+| `SITE_URL` | No | `http://localhost:8000` | Public base URL (payment webhooks) |
+| `CHAPA_SECRET_KEY` | No | — | Chapa payment secret |
+| `CHAPA_WEBHOOK_SECRET` | No | — | Chapa webhook HMAC secret |
+| `FCM_SERVER_KEY` | No | — | FCM server key (push) |
+| `REMINDER_SECRET` | No | — | Secret for the reminders task endpoint |
+| `SMS_API_KEY` / `SMS_PROVIDER_URL` | No | — | SMS provider (OTP + password reset) |
 
 ### Flutter App
 ```bash
-cd Rivalink
+cd lets_play_app
 flutter run -d <device-id>
 # Or build + install without re-login:
 flutter build apk --debug

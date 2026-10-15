@@ -22,6 +22,8 @@ class UserProfile(models.Model):
     phone_verified = models.BooleanField(default=False)
     phone_code = models.CharField(max_length=6, blank=True, default='')
     phone_code_expires = models.DateTimeField(null=True, blank=True)
+    reset_token = models.CharField(max_length=64, blank=True, default='')
+    reset_token_expires = models.DateTimeField(null=True, blank=True)
     no_show_count = models.IntegerField(default=0)
     referral_code = models.CharField(max_length=12, unique=True, null=True, blank=True)
     referral_credit = models.IntegerField(default=0)
@@ -476,7 +478,7 @@ class Venue(models.Model):
     city = models.CharField(max_length=100)
     location = models.CharField(max_length=200, blank=True, default='')  # lat,lng
     sports = models.CharField(max_length=500, default='')  # comma-separated
-    price_per_hour = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    slot_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)  # price per 2-hour slot
     capacity = models.IntegerField(default=0)
     amenities = models.TextField(blank=True, default='')  # comma-separated
     images = models.TextField(blank=True, default='')  # comma-separated URLs
@@ -749,6 +751,67 @@ class Payment(models.Model):
 
     def __str__(self):
         return f"{self.user.username} - {self.payment_type} - {self.status} ({self.tx_ref})"
+
+
+class PlatformTransaction(models.Model):
+    """Platform revenue ledger — one row per fee/commission the app earns."""
+
+    KIND_CHOICES = [
+        ('venue_commission', 'Venue Booking Commission'),
+        ('host_fee', 'Match Host Fee'),
+        ('referee_commission', 'Referee Booking Commission'),
+        ('tournament_fee', 'Tournament Entry Fee'),
+        ('premium', 'Premium Subscription'),
+        ('featured_listing', 'Featured Listing'),
+    ]
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('collected', 'Collected'),
+        ('refunded', 'Refunded'),
+        ('waived', 'Waived'),
+    ]
+
+    kind = models.CharField(max_length=32, choices=KIND_CHOICES)
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    currency = models.CharField(max_length=10, default='ETB')
+    payer = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
+                              related_name='platform_transactions')
+    reference_type = models.CharField(max_length=32, blank=True, default='')
+    reference_id = models.IntegerField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    note = models.CharField(max_length=300, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['kind']),
+            models.Index(fields=['created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.get_kind_display()}: {self.amount} {self.currency} ({self.status})"
+
+
+class AuditLog(models.Model):
+    """Security audit trail — auth events and sensitive actions."""
+
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
+                             related_name='audit_logs')
+    action = models.CharField(max_length=64)
+    status = models.CharField(max_length=16, default='ok')
+    ip = models.CharField(max_length=64, blank=True, default='')
+    user_agent = models.CharField(max_length=255, blank=True, default='')
+    detail = models.CharField(max_length=500, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['action']),
+            models.Index(fields=['created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.action} ({self.status})"
 
 
 class Report(models.Model):

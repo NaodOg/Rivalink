@@ -27,12 +27,20 @@ from .views import (
 from .payment_views import (
     initialize_premium_payment, payment_webhook, payment_status, get_my_payments
 )
+from .revenue_views import revenue_summary, my_transactions
+from .auth_views import (
+    change_password, logout_all, password_reset_request, password_reset_confirm,
+)
 
 urlpatterns = [
     path('health/', health_check, name='health_check'),
     path('auth/signup/', signup, name='signup'),
     path('auth/login/', login, name='login'),
     path('auth/logout/', logout, name='logout'),
+    path('auth/logout-all/', logout_all, name='logout_all'),
+    path('auth/password/change/', change_password, name='change_password'),
+    path('auth/password/reset/request/', password_reset_request, name='password_reset_request'),
+    path('auth/password/reset/confirm/', password_reset_confirm, name='password_reset_confirm'),
     path('auth/profile/', update_profile, name='update_profile'),
     path('auth/profile/image/', upload_profile_image, name='upload_profile_image'),
     path('teams/create/', create_team, name='create_team'),
@@ -135,5 +143,8 @@ urlpatterns = [
     path('payments/webhook/', payment_webhook, name='payment_webhook'),
     path('payments/status/', payment_status, name='payment_status'),
     path('payments/history/', get_my_payments, name='get_my_payments'),
+    # Revenue / monetization
+    path('revenue/summary/', revenue_summary, name='revenue_summary'),
+    path('revenue/me/', my_transactions, name='my_transactions'),
 ]
 

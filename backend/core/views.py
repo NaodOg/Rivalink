@@ -19,6 +19,11 @@ from .sms import send_sms
 from .entitlements import (
     is_premium, can_host_match, can_create_team, can_join_team, team_all_premium,
 )
+from .monetization import (
+    host_fee_for, venue_commission, referee_commission, tournament_fee,
+    record_transaction, BOOKING_SLOT_HOURS,
+)
+from .audit import log_event
 from .serializers import (
     err_msg as _err_msg, display_name,
     match_summary, match_my, match_history,
@@ -44,7 +49,7 @@ from .validators import (
 def health_check(request):
     return Response({
         "status": "ok",
-        "message": "VYRO backend connected successfully"
+        "message": "Rivalink backend connected successfully"
     })
 
 @api_view(['POST'])
@@ -65,10 +70,11 @@ def signup(request):
         except ValueError as e:
             return Response({'error': _err_msg(e)}, status=status.HTTP_400_BAD_REQUEST)
         
-        # Check if user already exists
+        # Check if user already exists (generic error — no email enumeration)
         if User.objects.filter(username=email).exists():
+            log_event(request, 'signup', None, 'duplicate_email')
             return Response(
-                {'error': 'User with this email already exists'},
+                {'error': 'Sign up failed. Please try logging in instead.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
@@ -101,7 +107,9 @@ def signup(request):
         
         # Create token
         token, created = Token.objects.get_or_create(user=user)
-        
+
+        log_event(request, 'signup', user, 'ok')
+
         return Response({
             'message': 'Account created successfully',
             'token': token.key,
@@ -119,8 +127,9 @@ def signup(request):
         }, status=status.HTTP_201_CREATED)
         
     except IntegrityError:
+        log_event(request, 'signup', None, 'integrity_error')
         return Response(
-            {'error': 'User with this email already exists'},
+            {'error': 'Sign up failed. Please try logging in instead.'},
             status=status.HTTP_400_BAD_REQUEST
         )
     except Exception as e:
@@ -313,7 +322,7 @@ def join_league(request):
 
             if not team_all_premium(team):
                 return Response({
-                    'error': 'All team members need VYRO Premium to join a league.',
+                    'error': 'All team members need Rivalink Premium to join a league.',
                     'upgrade_required': True,
                 }, status=status.HTTP_402_PAYMENT_REQUIRED)
 
@@ -661,6 +670,7 @@ def login(request):
         user = authenticate(username=email, password=password)
         
         if user is None:
+            log_event(request, 'login', None, 'failed', email)
             return Response(
                 {'error': 'Invalid email or password'},
                 status=status.HTTP_401_UNAUTHORIZED
@@ -668,6 +678,8 @@ def login(request):
         
         # Get or create token
         token, created = Token.objects.get_or_create(user=user)
+
+        log_event(request, 'login', user, 'ok')
         
         # Get full name
         full_name = f"{user.first_name} {user.last_name}".strip()
@@ -1441,6 +1453,7 @@ def logout(request):
     try:
         # Delete the user's token
         request.user.auth_token.delete()
+        log_event(request, 'logout', request.user, 'ok')
         return Response(
             {'message': 'Logged out successfully'},
             status=status.HTTP_200_OK
@@ -1726,8 +1739,17 @@ def create_match(request):
             user=request.user
         )
 
+        host_fee = host_fee_for(request.user)
+        if host_fee > 0:
+            record_transaction(
+                'host_fee', host_fee, payer=request.user,
+                reference_type='match', reference_id=match.id,
+                note=f'Host fee for "{match.title}"',
+            )
+
         return Response({
             'message': 'Match created successfully',
+            'host_fee': str(host_fee),
             'match': {
                 'id': match.id,
                 'title': match.title,
@@ -2973,11 +2995,19 @@ def book_referee(request):
             message=f'{request.user.first_name} wants you to referee {match.title}',
             related_match=match
         )
-        
+
+        commission = referee_commission(booking.fee)
+        record_transaction(
+            'referee_commission', commission, payer=request.user,
+            reference_type='referee_booking', reference_id=booking.id,
+            note=f'Commission on referee booking for "{match.title}"',
+        )
+
         return Response({
             'success': True,
             'message': 'Booking request sent',
-            'booking': _booking_to_dict(booking)
+            'booking': _booking_to_dict(booking),
+            'platform_commission': str(commission),
         }, status=status.HTTP_201_CREATED)
         
     except Referee.DoesNotExist:
@@ -3135,7 +3165,7 @@ def create_venue(request):
             city = validate_string(_get(raw, 'city'), 100, 'City')
             sports = validate_optional_string(_get(raw, 'sports'), 500, 'Sports')
             capacity = validate_int(_get(raw, 'capacity', '0'), 0, 100000, 'Capacity')
-            price = validate_decimal(_get(raw, 'price_per_hour', '0'), 0, 99999, 'Price per hour')
+            price = validate_decimal(_get(raw, 'slot_price', '0'), 0, 99999, 'Price per 2-hour slot')
             amenities = validate_optional_string(_get(raw, 'amenities'), 2000, 'Amenities')
             opening_time = _get(raw, 'opening_time') or None
             closing_time = _get(raw, 'closing_time') or None
@@ -3149,7 +3179,7 @@ def create_venue(request):
             address=address,
             city=city,
             sports=sports,
-            price_per_hour=price,
+            slot_price=price,
             capacity=capacity,
             amenities=amenities,
             opening_time=opening_time,
@@ -3288,8 +3318,8 @@ def update_venue(request, venue_id):
                 venue.city = validate_optional_string(request.data['city'], 100, 'City')
             if 'sports' in request.data:
                 venue.sports = validate_optional_string(request.data['sports'], 100, 'Sports')
-            if 'price_per_hour' in request.data:
-                venue.price_per_hour = validate_decimal(request.data['price_per_hour'], 0, 999999, 'Price per hour')
+            if 'slot_price' in request.data:
+                venue.slot_price = validate_decimal(request.data['slot_price'], 0, 999999, 'Price per 2-hour slot')
             if 'capacity' in request.data:
                 venue.capacity = validate_int(request.data['capacity'], 0, 100000, 'Capacity')
             if 'amenities' in request.data:
@@ -3353,11 +3383,18 @@ def book_venue(request):
         try:
             start_dt = datetime.strptime(start_time, '%H:%M')
             end_dt = datetime.strptime(end_time, '%H:%M')
-            hours = max(1, int((end_dt - start_dt).seconds / 3600))
+            hours = int((end_dt - start_dt).seconds / 3600)
         except (ValueError, TypeError):
-            hours = 1
-        
-        total_price = float(venue.price_per_hour) * hours
+            hours = 0
+
+        if hours < BOOKING_SLOT_HOURS:
+            return Response({
+                'error': f'Venues are booked in {BOOKING_SLOT_HOURS}-hour slots '
+                         f'(minimum {BOOKING_SLOT_HOURS} hours).',
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        slots = max(1, hours // BOOKING_SLOT_HOURS)
+        total_price = float(venue.slot_price) * slots
         
         booking = VenueBooking.objects.create(
             venue=venue,
@@ -3384,10 +3421,18 @@ def book_venue(request):
             title='New Venue Booking',
             message=f'{request.user.first_name} booked {venue.name}',
         )
-        
+
+        commission = venue_commission(booking.total_price)
+        record_transaction(
+            'venue_commission', commission, payer=request.user,
+            reference_type='venue_booking', reference_id=booking.id,
+            note=f'Commission on {venue.name} booking ({booking.hours}h)',
+        )
+
         return Response({
             'success': True,
-            'booking': _venue_booking_to_dict(booking)
+            'booking': _venue_booking_to_dict(booking),
+            'platform_commission': str(commission),
         }, status=status.HTTP_201_CREATED)
         
     except Venue.DoesNotExist:
@@ -3697,11 +3742,19 @@ def register_team_tournament(request):
             
             tournament.current_teams += 1
             tournament.save()
-        
+
+            entry_fee = tournament_fee(tournament.entry_fee)
+            record_transaction(
+                'tournament_fee', entry_fee, payer=request.user,
+                reference_type='tournament', reference_id=tournament.id,
+                note=f'Entry fee cut for "{tournament.name}" ({team.name})',
+            )
+
         return Response({
             'success': True,
             'message': 'Team registered successfully',
-            'team': _tournament_team_to_dict(tt)
+            'team': _tournament_team_to_dict(tt),
+            'platform_fee': str(entry_fee),
         }, status=status.HTTP_201_CREATED)
         
     except Tournament.DoesNotExist:
@@ -3937,12 +3990,13 @@ def _get_quick_available_slots(venue, target_date, max_slots=4, active_bookings=
     now = timezone.localtime().replace(tzinfo=None)
     cursor = day_start
     slots = []
-    while cursor + timedelta(hours=1) <= day_end and len(slots) < max_slots:
+    slot_delta = timedelta(hours=BOOKING_SLOT_HOURS)
+    while cursor + slot_delta <= day_end and len(slots) < max_slots:
         slot_start = cursor
-        slot_end = cursor + timedelta(hours=1)
+        slot_end = cursor + slot_delta
 
         if target_date == timezone.localdate() and slot_start <= now:
-            cursor += timedelta(hours=1)
+            cursor += slot_delta
             continue
 
         overlaps = any(slot_start < end and slot_end > start for start, end in blocked)
@@ -3953,7 +4007,7 @@ def _get_quick_available_slots(venue, target_date, max_slots=4, active_bookings=
                 'label': f"{slot_start.strftime('%H:%M')} - {slot_end.strftime('%H:%M')}",
             })
 
-        cursor += timedelta(hours=1)
+        cursor += slot_delta
 
     return slots
 
@@ -4149,7 +4203,7 @@ def send_phone_code(request):
     profile.phone_code = code
     profile.phone_code_expires = timezone.now() + timedelta(minutes=10)
     profile.save(update_fields=['phone', 'phone_code', 'phone_code_expires'])
-    sent = send_sms(phone, f'Your VYRO verification code is {code}')
+    sent = send_sms(phone, f'Your Rivalink verification code is {code}')
     payload = {'success': True, 'sent': sent}
     if settings.DEBUG and not sent:
         payload['dev_code'] = code

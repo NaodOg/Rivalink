@@ -46,6 +46,6 @@ def team_all_premium(team):
 
 
 PREMIUM_REQUIRED_RESPONSE = {
-    'error': 'This feature requires VYRO Premium',
+    'error': 'This feature requires Rivalink Premium',
     'upgrade_required': True,
 }
