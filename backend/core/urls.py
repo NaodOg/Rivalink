@@ -1,28 +1,43 @@
 from django.urls import path
-from .views import (
-    health_check, signup, login, logout, update_profile,
+from .views_auth import (
+    health_check, signup, login, logout, update_profile, upload_profile_image,
+)
+from .views_matches import (
+    create_match, get_matches, get_my_matches, join_match, get_match_details,
+    leave_match, cancel_match, get_match_history, search_matches,
+    get_match_chat, send_match_chat, edit_match,
+    match_ratings, match_result, get_match_recommendations,
+)
+from .views_teams import (
     create_team, get_my_teams, get_teams_seeking_players, join_team, leave_team,
     get_team_members, remove_team_member, update_member_role,
     get_team_join_requests, handle_join_request, request_to_join_team,
-    create_match, get_matches, get_my_matches, join_match, get_match_details,
-    leave_match, cancel_match, get_match_history,
-    get_notifications, mark_notifications_read, search_matches,
-    get_match_chat, send_match_chat, get_team_chat, send_team_chat, edit_match,
-    get_leagues, get_my_leagues, create_league, edit_league, delete_league, join_league, get_league_details,
-    match_ratings, user_ratings, match_result, get_user_stats,
-    manage_favorites, check_favorite, get_match_recommendations,
-    get_conversations, get_messages,
-    create_referee_profile, get_referee_profile, list_referees,
-    book_referee, list_referee_bookings, update_booking_status, rate_referee,
+    get_team_chat, send_team_chat,
+)
+from .views_leagues import (
+    get_leagues, get_my_leagues, create_league, edit_league, delete_league,
+    join_league, get_league_details,
+)
+from .views_venues import (
     create_venue, list_venues, get_venue, get_my_venues, update_venue, delete_venue,
     book_venue, get_venue_bookings, update_venue_booking, rate_venue,
-    upload_profile_image,
-    create_tournament, list_tournaments, get_tournament, get_my_tournaments, edit_tournament, delete_tournament,
-    register_team_tournament, start_tournament, update_match_result,
+)
+from .views_referees import (
+    create_referee_profile, get_referee_profile, list_referees,
+    book_referee, list_referee_bookings, update_booking_status, rate_referee,
+)
+from .views_tournaments import (
+    create_tournament, list_tournaments, get_tournament, get_my_tournaments,
+    edit_tournament, delete_tournament, register_team_tournament, start_tournament,
+    update_match_result,
+)
+from .views_social import (
+    get_notifications, mark_notifications_read, user_ratings, get_user_stats,
+    manage_favorites, check_favorite, get_conversations, get_messages,
     get_individual_rankings, get_team_rankings, get_user_elo, get_user_form,
     create_report, toggle_block, register_device, unregister_device, run_reminders,
-    social_me, follow_toggle, list_following, list_followers, list_teammates, list_referrals,
-    send_phone_code, verify_phone, phone_status
+    social_me, follow_toggle, list_following, list_followers, list_teammates,
+    list_referrals, send_phone_code, verify_phone, phone_status,
 )
 from .payment_views import (
     initialize_premium_payment, payment_webhook, payment_status, get_my_payments
