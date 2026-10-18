@@ -134,7 +134,7 @@ def validate_image(uploaded_file):
     if uploaded_file.size == 0:
         raise ValueError('Uploaded file is empty')
     if uploaded_file.size > MAX_IMAGE_SIZE_BYTES:
-        raise ValueError(f'Image size exceeds 5MB limit')
+        raise ValueError('Image size exceeds 5MB limit')
 
     ext = uploaded_file.name.rsplit('.', 1)[-1].lower() if '.' in uploaded_file.name else ''
     if ext not in ALLOWED_IMAGE_EXTENSIONS:

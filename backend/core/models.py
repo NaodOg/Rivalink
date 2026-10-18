@@ -658,26 +658,6 @@ class TournamentMatch(models.Model):
         return self.team2.team.name if self.team2 else 'TBD'
 
 
-class TournamentRegistration(models.Model):
-    STATUS_CHOICES = [
-        ('pending', 'Pending'),
-        ('approved', 'Approved'),
-        ('rejected', 'Rejected'),
-    ]
-    
-    tournament = models.ForeignKey(Tournament, on_delete=models.CASCADE, related_name='registrations')
-    team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name='registration_requests')
-    requested_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='tournament_requests')
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        unique_together = ('tournament', 'team')
-
-    def __str__(self):
-        return f"{self.team.name} -> {self.tournament.name}"
-
-
 class UserSportRating(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='sport_ratings')
     sport = models.CharField(max_length=50)

@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, time
 import random
 from .models import UserProfile, Team, TeamMember, Match, MatchParticipant, MatchWaitlist, Notification, ChatMessage, TeamJoinRequest, League, LeagueMember, PlayerRating, MatchResult, Favorite, DirectMessage, Referee, RefereeBooking, RefereeRating, Venue, VenueBooking, VenueRating, Tournament, TournamentTeam, TournamentMatch, UserSportRating, TeamRanking, Report, Block, DeviceToken, Follow, Referral
 from .elo import update_elo_with_matches
-from .push import notify, send_push, push_many
+from .push import notify
 from .sms import send_sms
 from .entitlements import (
     is_premium, can_host_match, can_create_team, can_join_team, team_all_premium,
@@ -733,7 +733,7 @@ def upload_profile_image(request):
             validate_image(uploaded)
         except ValueError as e:
             return Response({'error': _err_msg(e)}, status=status.HTTP_400_BAD_REQUEST)
-        import uuid, os
+        import uuid
         from django.core.files.storage import default_storage
         ext = uploaded.name.rsplit('.', 1)[-1] if '.' in uploaded.name else 'jpg'
         filename = f'profiles/{uuid.uuid4().hex}.{ext}'
@@ -835,20 +835,6 @@ def update_profile(request):
             user.profile.save()
         
         # Get phone from profile
-        phone = ''
-        bio = ''
-        location = ''
-        fav_sports = ''
-        if hasattr(user, 'profile'):
-            phone = user.profile.phone
-            bio = user.profile.bio
-            location = user.profile.location
-            fav_sports = user.profile.favorite_sports
-        
-        full_name = f"{user.first_name} {user.last_name}".strip()
-        if not full_name:
-            full_name = user.username
-
         return Response({
             'message': 'Profile updated successfully',
             'user': _user_payload(user),
@@ -2385,7 +2371,6 @@ def _compute_rankings(match, result):
             p1 = participants[0]
             p2 = participants[1]
             winner_id = result.winner_user_id
-            loser_id = p2.user.id if p1.user.id == winner_id else p1.user.id
 
             rating1, _ = UserSportRating.objects.get_or_create(user=p1.user, sport=sport)
             rating2, _ = UserSportRating.objects.get_or_create(user=p2.user, sport=sport)
@@ -3872,7 +3857,7 @@ def _generate_bracket(tournament):
             matches_in_round = bracket_size // (2 ** round_num)
         
         for i in range(matches_in_round):
-            tm = TournamentMatch.objects.create(
+            TournamentMatch.objects.create(
                 tournament=tournament,
                 round_number=round_num,
                 match_number=match_num,

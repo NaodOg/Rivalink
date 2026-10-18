@@ -18,7 +18,6 @@ class NotificationsScreen extends StatefulWidget {
 
 class _NotificationsScreenState extends State<NotificationsScreen> {
   List<dynamic> _items = [];
-  int _unread = 0;
   bool _loading = true;
   bool _error = false;
 
@@ -39,7 +38,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       final unread = (result['unread_count'] ?? 0) as int;
       setState(() {
         _items = items;
-        _unread = unread;
         _loading = false;
       });
       if (unread > 0) {

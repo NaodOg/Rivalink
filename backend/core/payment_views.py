@@ -2,7 +2,6 @@ import uuid
 import hmac
 import hashlib
 import requests as http_requests
-from decimal import Decimal
 from django.conf import settings
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response

@@ -29,7 +29,6 @@ import '../widgets/pf_sport_tile.dart';
 import '../widgets/profile_header.dart';
 import '../widgets/search_header.dart';
 import '../widgets/notification_bell.dart';
-import 'ranking_screen.dart';
 
 class ShellScreen extends StatefulWidget {
   final SessionController session;
@@ -735,7 +734,6 @@ class _ProfileTabState extends State<_ProfileTab> {
   List<Map<String, dynamic>> _ratings = [];
   List<String> _form = [];
   bool _verified = false;
-  bool _loading = true;
   bool _loadingRatings = true;
 
   @override
@@ -748,13 +746,11 @@ class _ProfileTabState extends State<_ProfileTab> {
     final token = widget.session.token;
     final userId = widget.session.user?['id'];
     if (token == null || userId == null) return;
-    setState(() => _loading = true);
     final result = await widget.repo.getProfileStats(token, userId as int);
     if (!mounted) return;
     setState(() {
       _stats = result['stats'] as Map<String, dynamic>?;
       _userInfo = result['user'] as Map<String, dynamic>?;
-      _loading = false;
     });
     final social = await widget.repo.getSocialMe(token);
     if (!mounted) return;
@@ -762,7 +758,7 @@ class _ProfileTabState extends State<_ProfileTab> {
     final phone = await widget.repo.getPhoneStatus(token);
     if (!mounted) return;
     setState(() => _verified = phone['phone_verified'] == true);
-    final form = await widget.repo.getUserForm(token, userId as int);
+    final form = await widget.repo.getUserForm(token, userId);
     if (!mounted) return;
     setState(() => _form = form);
     _loadRatings();

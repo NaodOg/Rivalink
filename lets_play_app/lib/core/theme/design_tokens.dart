@@ -52,8 +52,6 @@ class PFColors {
   static const card = surface;
   static const cardSoft = surfaceRaised;
   static const accent = primary;
-  static const accentDark = primaryPressed;
-  static const onAccent = onPrimary;
   static const muted = textSecondary;
   static const scrimTop = Color(0xFF0D0D0F);
 }

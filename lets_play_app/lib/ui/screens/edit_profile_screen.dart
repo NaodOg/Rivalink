@@ -84,6 +84,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       if (updatedUser != null) {
         await widget.session.updateUser(updatedUser);
       }
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile updated')));
       Navigator.pop(context);
     } else {

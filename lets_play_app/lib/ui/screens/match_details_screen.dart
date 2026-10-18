@@ -88,8 +88,11 @@ class _MatchDetailsScreenState extends State<MatchDetailsScreen> {
       final group = p['team_group']?.toString() ?? '';
       if (group == 'A') {
         teamA.add(p);
-      } else if (group == 'B') teamB.add(p);
-      else unassigned.add(p);
+      } else if (group == 'B') {
+        teamB.add(p);
+      } else {
+        unassigned.add(p);
+      }
     }
 
     showModalBottomSheet(
@@ -109,8 +112,11 @@ class _MatchDetailsScreenState extends State<MatchDetailsScreen> {
                 teamB.remove(player);
                 if (group == 'A') {
                   teamA.add(player);
-                } else if (group == 'B') teamB.add(player);
-                else unassigned.add(player);
+                } else if (group == 'B') {
+                  teamB.add(player);
+                } else {
+                  unassigned.add(player);
+                }
               });
             }
 
@@ -359,6 +365,7 @@ class _MatchDetailsScreenState extends State<MatchDetailsScreen> {
                       child: PFButton(
                         label: 'Submit Result',
                         onTap: () async {
+                          final messenger = ScaffoldMessenger.of(context);
                           if (_isTeamSport && (teamA.isEmpty || teamB.isEmpty)) {
                             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Assign players to both teams')));
                             return;
@@ -401,7 +408,7 @@ class _MatchDetailsScreenState extends State<MatchDetailsScreen> {
 
                           if (!ctx.mounted) return;
                           Navigator.pop(ctx);
-                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                          messenger.showSnackBar(SnackBar(
                             content: Text(res['message'] ?? (res['success'] == true ? 'Result submitted!' : res['error'] ?? 'Failed')),
                           ));
                           _load();
