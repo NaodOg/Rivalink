@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+{% load static %}
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rivalink Insights</title>
+<script src="{% static 'analytics/chart.umd.min.js' %}"></script>
+<style>
+  :root {
+    --bg:#0A0A0B; --surface:#141417; --raised:#1B1B1F; --border:#2C2C31;
+    --text:#F2F5EF; --muted:#A6AEA6; --dim:#6D766D;
+    --primary:#2B5BFF; --success:#57D98A; --danger:#FF5C57;
+    --warning:#FFB020; --gold:#F5C24B; --violet:#B07CFF;
+  }
+  * { box-sizing: border-box; }
+  html, body { max-width: 100%; overflow-x: hidden; }
+  body {
+    margin:0; background:var(--bg); color:var(--text);
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1400px; margin: 0 auto; padding: 28px 24px 64px; }
+  header.top { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; flex-wrap:wrap; margin-bottom:26px; }
+  .brand { display:flex; align-items:center; gap:12px; }
+  .mark { width:38px; height:38px; border-radius:12px; background:linear-gradient(135deg,#0B86FF,#0F5DB5); display:grid; place-items:center; font-weight:800; font-size:14px; letter-spacing:.5px; }
+  h1 { font-size:24px; margin:0; letter-spacing:-.3px; }
+  .sub { color:var(--muted); font-size:12.5px; margin-top:4px; }
+  .controls { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .pills { display:flex; background:var(--surface); border:1px solid var(--border); border-radius:999px; padding:3px; }
+  .pills a { color:var(--muted); text-decoration:none; font-size:12.5px; font-weight:700; padding:7px 14px; border-radius:999px; }
+  .pills a.active { background:var(--primary); color:#fff; }
+  .btn { display:inline-flex; align-items:center; gap:7px; border:1px solid var(--border); background:var(--surface); color:var(--text); font-size:12.5px; font-weight:700; padding:9px 14px; border-radius:10px; text-decoration:none; cursor:pointer; }
+  .btn:hover { border-color:var(--primary); }
+  .btn.primary { background:var(--primary); border-color:var(--primary); color:#fff; }
+
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:12px; margin-bottom:22px; }
+  .kpi { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:14px 16px; min-width:0; }
+  .kpi .label { color:var(--dim); font-size:10px; letter-spacing:1.4px; text-transform:uppercase; font-weight:800; }
+  .kpi .value { font-size:24px; font-weight:800; margin-top:6px; font-variant-numeric:tabular-nums; }
+  .kpi .hint { color:var(--muted); font-size:11px; margin-top:3px; }
+  .kpi.accent .value { color:var(--primary); }
+  .kpi.gold .value { color:var(--gold); }
+  .kpi.good .value { color:var(--success); }
+  .kpi.bad .value { color:var(--danger); }
+
+  .grid { display:grid; grid-template-columns:minmax(0, 1fr) minmax(0, 1fr); gap:16px; margin-bottom:16px; }
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:18px; min-width:0; }
+  .card h2 { font-size:13px; text-transform:uppercase; letter-spacing:1.3px; color:var(--muted); margin:0 0 14px; font-weight:800; }
+  .chart { position:relative; height:240px; min-width:0; }
+  canvas { max-width: 100%; }
+  .wide { grid-column: 1 / -1; }
+
+  .insights { display:flex; flex-direction:column; gap:10px; }
+  .insight { background:var(--raised); border:1px solid var(--border); border-left:3px solid var(--primary); border-radius:12px; padding:12px 14px; font-size:13px; color:var(--text); line-height:1.5; }
+  .muted { color:var(--muted); }
+  .empty { color:var(--dim); font-size:13px; padding:10px 0; }
+
+  table { width:100%; border-collapse:collapse; font-size:12.5px; table-layout:fixed; }
+  th { text-align:left; color:var(--dim); font-size:10px; letter-spacing:1.2px; text-transform:uppercase; font-weight:800; padding:8px 10px; border-bottom:1px solid var(--border); overflow-wrap:anywhere; }
+  td { padding:9px 10px; border-bottom:1px solid rgba(255,255,255,.035); color:var(--text); font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }
+  tr:last-child td { border-bottom:none; }
+  .right { text-align:right; }
+  .tag { display:inline-block; padding:3px 8px; border-radius:999px; font-size:10.5px; font-weight:800; }
+  .tag.good { background:rgba(87,217,138,.14); color:var(--success); }
+  .tag.warn { background:rgba(255,176,32,.14); color:var(--warning); }
+  .tag.bad { background:rgba(255,92,87,.14); color:var(--danger); }
+
+  .cols3 { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:16px; }
+  footer { color:var(--dim); font-size:11.5px; margin-top:28px; text-align:center; }
+
+  @media (max-width: 900px) {
+    .grid, .cols3 { grid-template-columns: 1fr; }
+  }
+  @media print {
+    :root { --bg:#fff; --surface:#fff; --raised:#f6f7f9; --border:#ddd; --text:#111; --muted:#555; --dim:#777; }
+    body { background:#fff; }
+    .controls { display:none; }
+    .card, .kpi { break-inside: avoid; }
+    .wrap { max-width:none; padding:0; }
+    .chart { height: 200px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div class="brand">
+      <div class="mark">R</div>
+      <div>
+        <h1>Rivalink Insights</h1>
+        <div class="sub">Last {{ days }} days · generated {{ generated_at }} · staff only</div>
+      </div>
+    </div>
+    <div class="controls">
+      <div class="pills">
+        <a href="?days=7" class="{% if days == 7 %}active{% endif %}">7d</a>
+        <a href="?days=30" class="{% if days == 30 %}active{% endif %}">30d</a>
+        <a href="?days=90" class="{% if days == 90 %}active{% endif %}">90d</a>
+      </div>
+      <a class="btn primary" href="/insights/export/?days={{ days }}">Download report</a>
+      <a class="btn" href="/insights/export/?days={{ days }}&format=json">JSON</a>
+      <button class="btn" onclick="window.print()">Print / PDF</button>
+    </div>
+  </header>
+
+  <section class="kpis">
+    <div class="kpi accent">
+      <div class="label">Active users</div>
+      <div class="value">{{ report.users.active }}</div>
+      <div class="hint">{{ report.users.new }} new · {{ report.users.total }} total</div>
+    </div>
+    <div class="kpi">
+      <div class="label">DAU / MAU</div>
+      <div class="value">{{ report.users.stickiness_pct }}%</div>
+      <div class="hint">DAU {{ report.users.dau }} · MAU {{ report.users.mau }}</div>
+    </div>
+    <div class="kpi good">
+      <div class="label">Matches completed</div>
+      <div class="value">{{ report.business.matches.completed }}</div>
+      <div class="hint">{{ report.business.matches.created }} created · {{ report.business.matches.completion_rate_pct }}% rate</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Avg match fill</div>
+      <div class="value">{{ report.business.matches.fill_rate_pct }}%</div>
+      <div class="hint">{{ report.business.matches.avg_players }} players per match</div>
+    </div>
+    <div class="kpi gold">
+      <div class="label">Net revenue</div>
+      <div class="value">Br {{ report.business.revenue.net }}</div>
+      <div class="hint">Gross {{ report.business.revenue.gross }} · pending {{ report.business.revenue.pending }}</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Pro users</div>
+      <div class="value">{{ report.business.premium.active }}</div>
+      <div class="hint">{{ report.business.premium.conversion_pct }}% of active · {{ report.business.premium.expiring_7d }} expiring</div>
+    </div>
+    <div class="kpi">
+      <div class="label">Venue bookings</div>
+      <div class="value">{{ report.business.bookings.created }}</div>
+      <div class="hint">{{ report.business.bookings.confirmed }} confirmed · {{ report.business.bookings.cancelled }} cancelled</div>
+    </div>
+    <div class="kpi {% if report.business.bookings.refund_rate_pct > 10 %}bad{% endif %}">
+      <div class="label">Refund rate</div>
+      <div class="value">{{ report.business.bookings.refund_rate_pct }}%</div>
+      <div class="hint">{{ report.business.refunds.participants_refunded }} participants refunded</div>
+    </div>
+  </section>
+
+  <section class="card wide" style="margin-bottom:16px;">
+    <h2>What to act on</h2>
+    <div class="insights">
+      {% for insight in report.insights %}
+        <div class="insight">{{ insight }}</div>
+      {% empty %}
+        <div class="empty">Not enough data yet for insights.</div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="grid">
+    <div class="card">
+      <h2>Daily active users</h2>
+      <div class="chart"><canvas id="dauChart"></canvas></div>
+    </div>
+    <div class="card">
+      <h2>Matches vs bookings per day</h2>
+      <div class="chart"><canvas id="activityChart"></canvas></div>
+    </div>
+    <div class="card">
+      <h2>Revenue by stream (collected)</h2>
+      {% if report.business.revenue.by_kind %}
+      <div class="chart"><canvas id="revenueChart"></canvas></div>
+      {% else %}
+      <div class="empty">No collected revenue yet — commissions are pending collection.</div>
+      {% endif %}
+    </div>
+    <div class="card">
+      <h2>Funnel conversion</h2>
+      <div class="chart"><canvas id="funnelChart"></canvas></div>
+    </div>
+    <div class="card">
+      <h2>Top screens</h2>
+      <div class="chart"><canvas id="screensChart"></canvas></div>
+    </div>
+    <div class="card">
+      <h2>Feature adoption (% of active users)</h2>
+      <div class="chart"><canvas id="featuresChart"></canvas></div>
+    </div>
+  </section>
+
+  <section class="grid">
+    <div class="card">
+      <h2>Business detail</h2>
+      <table>
+        <tr><th>Metric</th><th class="right">Value</th></tr>
+        <tr><td>Matches created</td><td class="right">{{ report.business.matches.created }}</td></tr>
+        <tr><td>Matches completed</td><td class="right">{{ report.business.matches.completed }}</td></tr>
+        <tr><td>Matches cancelled</td><td class="right">{{ report.business.matches.cancelled }}</td></tr>
+        <tr><td>Active matches now</td><td class="right">{{ report.business.matches.active_now }}</td></tr>
+        <tr><td>Bookings created</td><td class="right">{{ report.business.bookings.created }}</td></tr>
+        <tr><td>Bookings paid</td><td class="right">{{ report.business.bookings.paid }}</td></tr>
+        <tr><td>Bookings refunded</td><td class="right">{{ report.business.bookings.refunded }} (Br {{ report.business.bookings.refund_amount }})</td></tr>
+        <tr><td>Premium purchases</td><td class="right">{{ report.business.premium.new_purchases }}</td></tr>
+        <tr><td>Tournaments created</td><td class="right">{{ report.business.tournaments.created }}</td></tr>
+        <tr><td>Tournament registrations</td><td class="right">{{ report.business.tournaments.team_registrations }}</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <h2>Revenue by stream</h2>
+      <table>
+        <tr><th>Stream</th><th class="right">Txns</th><th class="right">Collected</th></tr>
+        {% for row in report.business.revenue.by_kind %}
+        <tr><td>{{ row.kind|cut:"_"|title }}</td><td class="right">{{ row.count }}</td><td class="right">Br {{ row.total }}</td></tr>
+        {% empty %}
+        <tr><td colspan="3" class="muted">No collected revenue yet.</td></tr>
+        {% endfor %}
+      </table>
+      <div style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap;">
+        <span class="tag good">ARPU Br {{ report.business.revenue.arpu }}</span>
+        <span class="tag warn">ARPPU Br {{ report.business.revenue.arppu }}</span>
+        <span class="tag">Paying users {{ report.business.revenue.paying_users }}</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="grid">
+    <div class="card">
+      <h2>Retention by weekly cohort</h2>
+      <table>
+        <tr><th>Cohort</th><th class="right">Users</th><th class="right">D1</th><th class="right">D7</th><th class="right">D30</th></tr>
+        {% for row in report.retention %}
+        <tr>
+          <td>{{ row.cohort }}</td>
+          <td class="right">{{ row.users }}</td>
+          <td class="right">{{ row.d1 }}%</td>
+          <td class="right">{{ row.d7 }}%</td>
+          <td class="right">{{ row.d30 }}%</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="5" class="muted">Not enough data yet.</td></tr>
+        {% endfor %}
+      </table>
+    </div>
+    <div class="card">
+      <h2>Funnels</h2>
+      <table>
+        <tr><th>Funnel</th><th>Steps</th><th class="right">Conversion</th></tr>
+        {% for name, funnel in report.funnels.items %}
+        <tr>
+          <td>{{ name|title }}</td>
+          <td class="muted">
+            {% for step in funnel.steps %}{{ step.name }}{% if not forloop.last %} → {% endif %}{% endfor %}
+          </td>
+          <td class="right">{{ funnel.conversion }}%</td>
+        </tr>
+        {% endfor %}
+      </table>
+    </div>
+  </section>
+
+  <section class="cols3">
+    <div class="card">
+      <h2>Top cities</h2>
+      <table>
+        {% for row in report.segments.by_city %}
+        <tr><td>{{ row.city }}</td><td class="right">{{ row.users }}</td></tr>
+        {% empty %}<tr><td class="muted">No data</td></tr>{% endfor %}
+      </table>
+    </div>
+    <div class="card">
+      <h2>Sport interest</h2>
+      <table>
+        {% for row in report.segments.by_sport %}
+        <tr><td>{{ row.sport }}</td><td class="right">{{ row.events }}</td></tr>
+        {% empty %}<tr><td class="muted">No data</td></tr>{% endfor %}
+      </table>
+    </div>
+    <div class="card">
+      <h2>Top searches</h2>
+      <table>
+        {% for row in report.segments.top_searches %}
+        <tr><td>{{ row.query }}</td><td class="right">{{ row.count }}</td></tr>
+        {% empty %}<tr><td class="muted">No data</td></tr>{% endfor %}
+      </table>
+    </div>
+  </section>
+
+  <section class="card wide" style="margin-top:16px;">
+    <h2>Growth models & experiments</h2>
+    <div class="cols3">
+      <div>
+        <table>
+          <tr><th>Model</th><th class="right">Samples</th><th class="right">Positives</th><th class="right">Accuracy</th></tr>
+          {% for name, model in growth.models.items %}
+          <tr>
+            <td>{{ name }}</td>
+            <td class="right">{{ model.samples }}</td>
+            <td class="right">{{ model.positives|default:"—" }}</td>
+            <td class="right">{{ model.accuracy|default:"—" }}</td>
+          </tr>
+          {% empty %}
+          <tr><td colspan="4" class="muted">Waiting for data — rules fallback is active.</td></tr>
+          {% endfor %}
+        </table>
+        <p class="muted" style="font-size:11px;margin-top:8px;">
+          Thresholds: join {{ growth.join_threshold }} exposures,
+          churn {{ growth.churn_threshold }} users, fill {{ growth.fill_threshold }} matches.
+        </p>
+      </div>
+      <div>
+        <table>
+          <tr><td>Recommendation exposures</td><td class="right">{{ growth.exposures }}</td></tr>
+          <tr><td>Settled (24h+)</td><td class="right">{{ growth.settled_exposures }}</td></tr>
+          <tr><td>Bandit trials</td><td class="right">{{ growth.bandit_trials }}</td></tr>
+        </table>
+      </div>
+      <div>
+        <table>
+          <tr><th>Ranking variant</th><th class="right">Exposures</th></tr>
+          {% for row in growth.variants %}
+          <tr><td>{{ row.variant }}</td><td class="right">{{ row.count }}</td></tr>
+          {% empty %}
+          <tr><td colspan="2" class="muted">No exposures yet.</td></tr>
+          {% endfor %}
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    Rivalink Insights · staff-only · data from in-app events, match results, bookings and the revenue ledger.
+  </footer>
+</div>
+
+{{ report|json_script:"report-data" }}
+<script>
+  const report = JSON.parse(document.getElementById('report-data').textContent);
+  Chart.defaults.color = '#A6AEA6';
+  Chart.defaults.borderColor = 'rgba(255,255,255,.06)';
+  Chart.defaults.font.family = '-apple-system, "Segoe UI", Roboto, sans-serif';
+  Chart.defaults.font.size = 11;
+
+  const primary = '#2B5BFF';
+  const green = '#57D98A';
+  const gold = '#F5C24B';
+  const violet = '#B07CFF';
+  const warning = '#FFB020';
+  const palette = [primary, green, gold, violet, warning, '#5AA9FF', '#FF8A3D'];
+
+  function chart(id, config) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    new Chart(el, config);
+  }
+
+  // DAU
+  chart('dauChart', {
+    type: 'line',
+    data: {
+      labels: report.users.dau_series.map(d => d.date.slice(5)),
+      datasets: [{
+        label: 'Active users',
+        data: report.users.dau_series.map(d => d.users),
+        borderColor: primary,
+        backgroundColor: 'rgba(43,91,255,.16)',
+        fill: true,
+        tension: .35,
+        pointRadius: 0,
+        borderWidth: 2,
+      }]
+    },
+    options: {
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+    }
+  });
+
+  // Matches vs bookings
+  const daily = report.business.daily || [];
+  chart('activityChart', {
+    type: 'bar',
+    data: {
+      labels: daily.map(d => d.date.slice(5)),
+      datasets: [
+        { label: 'Matches', data: daily.map(d => d.matches), backgroundColor: 'rgba(43,91,255,.65)', borderRadius: 4 },
+        { label: 'Bookings', data: daily.map(d => d.bookings), backgroundColor: 'rgba(87,217,138,.55)', borderRadius: 4 },
+      ]
+    },
+    options: {
+      maintainAspectRatio: false,
+      plugins: { legend: { position: 'bottom' } },
+      scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+    }
+  });
+
+  // Revenue doughnut
+  const streams = report.business.revenue.by_kind || [];
+  chart('revenueChart', {
+    type: 'doughnut',
+    data: {
+      labels: streams.map(r => r.kind.replaceAll('_', ' ')),
+      datasets: [{ data: streams.map(r => Number(r.total)), backgroundColor: palette, borderWidth: 0 }]
+    },
+    options: {
+      maintainAspectRatio: false,
+      cutout: '62%',
+      plugins: { legend: { position: 'bottom' } }
+    }
+  });
+
+  // Funnels
+  const funnelEntries = Object.entries(report.funnels || {});
+  chart('funnelChart', {
+    type: 'bar',
+    data: {
+      labels: funnelEntries.map(([name]) => name.charAt(0).toUpperCase() + name.slice(1)),
+      datasets: [{
+        label: 'Conversion %',
+        data: funnelEntries.map(([, f]) => f.conversion),
+        backgroundColor: 'rgba(245,194,75,.55)',
+        borderRadius: 5,
+      }]
+    },
+    options: {
+      indexAxis: 'y',
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { x: { beginAtZero: true, max: 100 } }
+    }
+  });
+
+  // Screens
+  const screens = (report.screens || []).slice(0, 6);
+  chart('screensChart', {
+    type: 'bar',
+    data: {
+      labels: screens.map(s => s.screen),
+      datasets: [{
+        label: 'Views',
+        data: screens.map(s => s.views),
+        backgroundColor: 'rgba(176,124,255,.55)',
+        borderRadius: 5,
+      }]
+    },
+    options: {
+      indexAxis: 'y',
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { x: { beginAtZero: true, ticks: { precision: 0 } } }
+    }
+  });
+
+  // Features
+  const features = (report.feature_adoption || []).slice(0, 7);
+  chart('featuresChart', {
+    type: 'bar',
+    data: {
+      labels: features.map(f => f.label),
+      datasets: [{
+        label: '% of active users',
+        data: features.map(f => f.pct_of_active),
+        backgroundColor: 'rgba(87,217,138,.55)',
+        borderRadius: 5,
+      }]
+    },
+    options: {
+      indexAxis: 'y',
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { x: { beginAtZero: true, max: 100 } }
+    }
+  });
+</script>
+</body>
+</html>

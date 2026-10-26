@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import '../../core/data/services/analytics_service.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/navigation/app_routes.dart';
@@ -46,6 +48,15 @@ class _MatchDetailsScreenState extends State<MatchDetailsScreen> {
         _match = details['match'] as Map<String, dynamic>?;
         _players = List<dynamic>.from(details['participants'] ?? []);
         _loading = false;
+        final loaded = _match;
+        if (loaded != null) {
+          AnalyticsService.event('match_viewed', {
+            'match_id': widget.matchId,
+            'sport': loaded['sport']?.toString() ?? '',
+            'price': loaded['price']?.toString() ?? '',
+            'current_players': loaded['current_players'] ?? 0,
+          });
+        }
       });
     } catch (_) {
       if (!mounted) return;
@@ -56,6 +67,11 @@ class _MatchDetailsScreenState extends State<MatchDetailsScreen> {
   Future<void> _join() async {
     final token = widget.session.token;
     if (token == null) return;
+    AnalyticsService.event('match_join_clicked', {
+      'match_id': widget.matchId,
+      'sport': _match?['sport']?.toString() ?? '',
+      'price': _match?['price']?.toString() ?? '',
+    });
     try {
       final res = await widget.repo.joinMatch(token, widget.matchId);
       if (!mounted) return;
@@ -386,7 +402,7 @@ class _MatchDetailsScreenState extends State<MatchDetailsScreen> {
                               'A': teamA.map((p) => p['user_id'] as int).toList(),
                               'B': teamB.map((p) => p['user_id'] as int).toList(),
                             };
-                            wg = winningGroup.isEmpty ? null : winningGroup;
+                            wg = (winningGroup == 'A' || winningGroup == 'B') ? winningGroup : null;
                           } else {
                             if (winningGroup == 'draw') {
                               wg = '';
@@ -395,11 +411,12 @@ class _MatchDetailsScreenState extends State<MatchDetailsScreen> {
                             }
                           }
 
+                          final isDraw = winningGroup == 'draw' || winningGroup.isEmpty;
                           final res = await widget.repo.submitMatchResult(
                             token: token,
                             matchId: widget.matchId,
-                            matchType: _isTeamSport ? 'pickup' : 'pickup',
-                            resultType: winningGroup == 'draw' || winningGroup == '' ? 'draw' : 'individual',
+                            matchType: _isTeamSport ? 'team_vs_team' : 'pickup',
+                            resultType: isDraw ? 'draw' : (_isTeamSport ? 'team' : 'individual'),
                             winnerUserId: winnerUserId,
                             winningGroup: wg,
                             score: scoreController.text,

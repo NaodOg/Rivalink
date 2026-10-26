@@ -13,19 +13,3 @@ class HomeBundle {
     this.forYou = const [],
   });
 }
-
-class AppStats {
-  final int matchesPlayed;
-  final int goals;
-  final int assists;
-  final int winRate;
-  final int xp;
-
-  const AppStats({
-    required this.matchesPlayed,
-    required this.goals,
-    required this.assists,
-    required this.winRate,
-    required this.xp,
-  });
-}

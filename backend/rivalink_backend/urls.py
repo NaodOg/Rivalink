@@ -19,9 +19,13 @@ from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 
+from core.analytics_dashboard import dashboard as analytics_dashboard, export_report
+
 urlpatterns = [
     path(settings.ADMIN_URL, admin.site.urls),
     path('api/', include('core.urls')),
+    path('insights/', analytics_dashboard, name='analytics_dashboard'),
+    path('insights/export/', export_report, name='analytics_export'),
 ]
 
 if settings.DEBUG:

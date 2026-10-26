@@ -48,7 +48,7 @@ class ChatService {
       final response = await http.get(
         Uri.parse('$_baseUrl/matches/$matchId/chat/'),
         headers: headers,
-      );
+      ).timeout(ApiConfig.httpTimeout);
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
@@ -73,7 +73,7 @@ class ChatService {
         Uri.parse('$_baseUrl/matches/$matchId/chat/send/'),
         headers: headers,
         body: json.encode({'message': message}),
-      );
+      ).timeout(ApiConfig.httpTimeout);
 
       final data = json.decode(response.body);
 
@@ -98,7 +98,7 @@ class ChatService {
       final response = await http.get(
         Uri.parse('$_baseUrl/teams/$teamId/chat/'),
         headers: headers,
-      );
+      ).timeout(ApiConfig.httpTimeout);
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
@@ -123,7 +123,7 @@ class ChatService {
         Uri.parse('$_baseUrl/teams/$teamId/chat/send/'),
         headers: headers,
         body: json.encode({'message': message}),
-      );
+      ).timeout(ApiConfig.httpTimeout);
 
       final data = json.decode(response.body);
 

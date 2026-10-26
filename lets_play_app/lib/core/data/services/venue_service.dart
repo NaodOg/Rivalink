@@ -129,6 +129,7 @@ class VenueBooking {
   final int hours;
   final double totalPrice;
   final String status;
+  final String paymentStatus;
   final String notes;
   final DateTime createdAt;
 
@@ -146,6 +147,7 @@ class VenueBooking {
     required this.hours,
     required this.totalPrice,
     required this.status,
+    this.paymentStatus = 'unpaid',
     required this.notes,
     required this.createdAt,
   });
@@ -165,6 +167,7 @@ class VenueBooking {
       hours: json['hours'] ?? 1,
       totalPrice: (json['total_price'] ?? 0).toDouble(),
       status: json['status'] ?? 'pending',
+      paymentStatus: json['payment_status'] ?? 'unpaid',
       notes: json['notes'] ?? '',
       createdAt: DateTime.tryParse(json['created_at'] ?? '') ?? DateTime.now(),
     );
@@ -188,38 +191,41 @@ class VenueService {
     }
   }
 
-  static Future<List<Venue>> getVenues({String? sport, String? city, bool availableOnly = true}) async {
-    final cacheKey = '${CacheService.venuesKey}_$availableOnly';
+  static Future<List<Venue>> getVenues({
+    String? sport,
+    String? city,
+    bool availableOnly = true,
+    bool forceRefresh = false,
+  }) async {
+    final cacheKey =
+        '${CacheService.venuesKey}_${sport ?? ''}_${city ?? ''}_$availableOnly';
     try {
-      String url = '$_baseUrl/venues/?available=${availableOnly.toString()}';
-      if (sport != null && sport.isNotEmpty) {
-        url += '&sport=$sport';
-      }
-      if (city != null && city.isNotEmpty) {
-        url += '&city=$city';
-      }
+      final venuesJson = await CacheService.cachedFetch<List<dynamic>>(
+        key: cacheKey,
+        cacheMinutes: 10,
+        forceRefresh: forceRefresh,
+        fetch: () async {
+          String url = '$_baseUrl/venues/?available=${availableOnly.toString()}';
+          if (sport != null && sport.isNotEmpty) {
+            url += '&sport=$sport';
+          }
+          if (city != null && city.isNotEmpty) {
+            url += '&city=$city';
+          }
 
-      final response = await http.get(Uri.parse(url)).timeout(ApiConfig.httpTimeout);
+          final response = await http.get(Uri.parse(url)).timeout(ApiConfig.httpTimeout);
+          if (response.statusCode != 200) {
+            throw Exception('Server returned ${response.statusCode}');
+          }
+          final data = json.decode(response.body);
+          return List<dynamic>.from(data['venues'] ?? const []);
+        },
+      );
 
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        final List<dynamic> venuesJson = data['venues'] ?? [];
-        await CacheService.setCachedData(cacheKey, venuesJson, cacheMinutes: 10);
-        return venuesJson.map((v) => Venue.fromJson(v)).toList();
-      }
-      return _cachedVenues(cacheKey);
-    } catch (e) {
-      // Offline-first: fall back to the last good response.
-      return _cachedVenues(cacheKey);
+      return venuesJson.map((v) => Venue.fromJson(v)).toList();
+    } catch (_) {
+      return [];
     }
-  }
-
-  static Future<List<Venue>> _cachedVenues(String key) async {
-    final cached = await CacheService.getCachedData(key);
-    if (cached is List) {
-      return cached.map((v) => Venue.fromJson(v as Map<String, dynamic>)).toList();
-    }
-    return [];
   }
 
   static Future<Venue?> getVenue(int venueId) async {
@@ -317,53 +323,6 @@ class VenueService {
     }
   }
 
-  static Future<Map<String, dynamic>> updateVenue({
-    required int venueId,
-    String? name,
-    String? description,
-    String? address,
-    String? city,
-    String? sports,
-    double? slotPrice,
-    int? capacity,
-    String? amenities,
-    bool? isAvailable,
-  }) async {
-    try {
-      final headers = await _getAuth();
-      if (headers == null) return {'success': false, 'error': 'Not logged in'};
-
-      final body = <String, dynamic>{};
-      if (name != null) body['name'] = name;
-      if (description != null) body['description'] = description;
-      if (address != null) body['address'] = address;
-      if (city != null) body['city'] = city;
-      if (sports != null) body['sports'] = sports;
-      if (slotPrice != null) body['slot_price'] = slotPrice;
-      if (capacity != null) body['capacity'] = capacity;
-      if (amenities != null) body['amenities'] = amenities;
-      if (isAvailable != null) body['is_available'] = isAvailable;
-
-      final response = await http.put(
-        Uri.parse('$_baseUrl/venues/$venueId/update/'),
-        headers: headers,
-        body: json.encode(body),
-      ).timeout(ApiConfig.httpTimeout);
-
-      final data = json.decode(response.body);
-
-      if (response.statusCode == 200) {
-        return {
-          'success': true,
-          'venue': Venue.fromJson(data['venue']),
-        };
-      }
-      return {'success': false, 'error': data['error'] ?? 'Failed'};
-    } catch (e) {
-      return {'success': false, 'error': 'Connection error'};
-    }
-  }
-
   static Future<Map<String, dynamic>> bookVenue({
     required int venueId,
     required String date,
@@ -392,6 +351,7 @@ class VenueService {
       final data = json.decode(response.body);
 
       if (response.statusCode == 201) {
+        CacheService.invalidateVenues();
         return {
           'success': true,
           'booking': VenueBooking.fromJson(data['booking']),
@@ -403,12 +363,20 @@ class VenueService {
     }
   }
 
-  static Future<List<VenueBooking>> getVenueBookings({bool asOwner = true}) async {
+  static Future<List<VenueBooking>> getVenueBookings({
+    bool asOwner = true,
+    int? venueId,
+    String? status,
+    String? scope,
+  }) async {
     try {
       final headers = await _getAuth();
       if (headers == null) return [];
 
-      final url = '$_baseUrl/venues/bookings/?as=${asOwner ? 'owner' : 'booker'}';
+      var url = '$_baseUrl/venues/bookings/?as=${asOwner ? 'owner' : 'booker'}';
+      if (venueId != null) url += '&venue_id=$venueId';
+      if (status != null && status.isNotEmpty) url += '&status=$status';
+      if (scope != null && scope.isNotEmpty) url += '&scope=$scope';
 
       final response = await http.get(
         Uri.parse(url),
@@ -426,6 +394,73 @@ class VenueService {
     }
   }
 
+  /// Owner: day-by-day slot grid for a venue.
+  static Future<Map<String, dynamic>> getSchedule(int venueId, {String? from, String? to}) async {
+    try {
+      final headers = await _getAuth();
+      if (headers == null) return {};
+      var url = '$_baseUrl/venues/$venueId/schedule/';
+      final params = <String>[];
+      if (from != null) params.add('from=$from');
+      if (to != null) params.add('to=$to');
+      if (params.isNotEmpty) url += '?${params.join('&')}';
+      final response = await http.get(Uri.parse(url), headers: headers).timeout(ApiConfig.httpTimeout);
+      if (response.statusCode == 200) {
+        return json.decode(response.body) as Map<String, dynamic>;
+      }
+      return {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  /// Public: free/booked slots for a venue on a date.
+  static Future<Map<String, dynamic>> getAvailability(int venueId, String date) async {
+    try {
+      final response = await http
+          .get(Uri.parse('$_baseUrl/venues/$venueId/availability/?date=$date'))
+          .timeout(ApiConfig.httpTimeout);
+      if (response.statusCode == 200) {
+        return json.decode(response.body) as Map<String, dynamic>;
+      }
+      return {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  /// Public: availability for a date range (week strip).
+  static Future<Map<String, dynamic>> getAvailabilityRange(
+      int venueId, String from, String to) async {
+    try {
+      final response = await http
+          .get(Uri.parse('$_baseUrl/venues/$venueId/availability/?from=$from&to=$to'))
+          .timeout(ApiConfig.httpTimeout);
+      if (response.statusCode == 200) {
+        return json.decode(response.body) as Map<String, dynamic>;
+      }
+      return {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  /// Owner: revenue breakdown (per venue + per month).
+  static Future<Map<String, dynamic>> getRevenue() async {
+    try {
+      final headers = await _getAuth();
+      if (headers == null) return {};
+      final response = await http
+          .get(Uri.parse('$_baseUrl/venues/revenue/'), headers: headers)
+          .timeout(ApiConfig.httpTimeout);
+      if (response.statusCode == 200) {
+        return json.decode(response.body) as Map<String, dynamic>;
+      }
+      return {};
+    } catch (e) {
+      return {};
+    }
+  }
   static Future<Map<String, dynamic>> updateBookingStatus({
     required int bookingId,
     required String status,
@@ -443,6 +478,7 @@ class VenueService {
       final data = json.decode(response.body);
 
       if (response.statusCode == 200) {
+        CacheService.invalidateVenues();
         return {
           'success': true,
           'booking': VenueBooking.fromJson(data['booking']),
@@ -454,32 +490,35 @@ class VenueService {
     }
   }
 
-  static Future<Map<String, dynamic>> rateVenue({
-    required int venueId,
-    required int rating,
-    String comment = '',
+  /// Start a Chapa checkout for a pending venue booking.
+  static Future<Map<String, dynamic>> payBooking({
+    required int bookingId,
+    String returnUrl = '',
   }) async {
     try {
       final headers = await _getAuth();
       if (headers == null) return {'success': false, 'error': 'Not logged in'};
-
       final response = await http.post(
-        Uri.parse('$_baseUrl/venues/$venueId/rate/'),
+        Uri.parse('$_baseUrl/payments/venue/initialize/'),
         headers: headers,
-        body: json.encode({
-          'rating': rating,
-          'comment': comment,
-        }),
+        body: json.encode({'booking_id': bookingId, 'return_url': returnUrl}),
       ).timeout(ApiConfig.httpTimeout);
-
       final data = json.decode(response.body);
-
       if (response.statusCode == 200) {
-        return {'success': true};
+        CacheService.invalidateVenues();
+        return {'success': true, ...data};
       }
-      return {'success': false, 'error': data['error'] ?? 'Failed'};
+      return {'success': false, 'error': data['message'] ?? data['error'] ?? 'Payment failed'};
     } catch (e) {
       return {'success': false, 'error': 'Connection error'};
     }
+  }
+
+  /// Availability for a single date (returns the day's slot list).
+  static Future<List<Map<String, dynamic>>> getSlots(int venueId, String date) async {
+    final data = await getAvailability(venueId, date);
+    return (data['slots'] as List<dynamic>? ?? const [])
+        .map((s) => Map<String, dynamic>.from(s as Map))
+        .toList();
   }
 }

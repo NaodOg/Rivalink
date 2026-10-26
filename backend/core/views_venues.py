@@ -3,14 +3,17 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
-from datetime import datetime
+from datetime import datetime, timedelta, time
+from decimal import Decimal
 from .models import Match, Notification, Venue, VenueBooking, VenueRating
 from .monetization import (
-    venue_commission, record_transaction, BOOKING_SLOT_HOURS,
+    venue_commission, record_transaction, BOOKING_SLOT_HOURS, money,
 )
 from .serializers import (
-    err_msg as _err_msg, venue_to_dict as _venue_to_dict, venue_booking_to_dict as _venue_booking_to_dict,
+    err_msg as _err_msg, display_name,
+    venue_to_dict as _venue_to_dict, venue_booking_to_dict as _venue_booking_to_dict,
 )
 from .validators import (
     SensitiveWriteThrottle, validate_string, validate_optional_string, validate_int, validate_decimal, sanitize_text,
@@ -18,6 +21,7 @@ from .validators import (
 )
 
 
+from .analytics import track
 from .view_shared import (
     _get_quick_available_slots,
 )
@@ -245,6 +249,28 @@ def delete_venue(request, venue_id):
 
 
 
+def _parse_time(value):
+    """Normalise a request time ('10:00') or a datetime.time to datetime.time."""
+    if isinstance(value, time):
+        return value
+    return datetime.strptime(str(value), '%H:%M').time()
+
+
+def _has_conflict(venue, date, start_time, end_time, exclude_booking_id=None):
+    """True when an active booking already covers this slot."""
+    start = _parse_time(start_time)
+    end = _parse_time(end_time)
+
+    qs = VenueBooking.objects.filter(
+        venue=venue, date=date, status__in=['pending', 'confirmed'])
+    if exclude_booking_id:
+        qs = qs.exclude(id=exclude_booking_id)
+    for b in qs:
+        if start < b.end_time and end > b.start_time:
+            return True
+    return False
+
+
 @api_view(['POST'])
 @throttle_classes([SensitiveWriteThrottle])
 def book_venue(request):
@@ -269,13 +295,25 @@ def book_venue(request):
         
         venue = Venue.objects.get(id=venue_id)
         
+        # Validate the date and compute hours; reject overnight/invalid ranges.
+        try:
+            booking_date = datetime.strptime(str(date), '%Y-%m-%d').date()
+        except (ValueError, TypeError):
+            return Response({'error': 'date must be in YYYY-MM-DD format'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        
         # Calculate hours and price
         try:
             start_dt = datetime.strptime(start_time, '%H:%M')
             end_dt = datetime.strptime(end_time, '%H:%M')
-            hours = int((end_dt - start_dt).seconds / 3600)
         except (ValueError, TypeError):
-            hours = 0
+            return Response({'error': 'start_time and end_time must be in HH:MM format'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        
+        hours = int((end_dt - start_dt).total_seconds() / 3600)
+        if end_dt <= start_dt:
+            return Response({'error': 'end_time must be after start_time'},
+                            status=status.HTTP_400_BAD_REQUEST)
 
         if hours < BOOKING_SLOT_HOURS:
             return Response({
@@ -283,27 +321,39 @@ def book_venue(request):
                          f'(minimum {BOOKING_SLOT_HOURS} hours).',
             }, status=status.HTTP_400_BAD_REQUEST)
 
-        slots = max(1, hours // BOOKING_SLOT_HOURS)
-        total_price = float(venue.slot_price) * slots
-        
-        booking = VenueBooking.objects.create(
-            venue=venue,
-            booked_by=request.user,
-            date=date,
-            start_time=start_time,
-            end_time=end_time,
-            hours=hours,
-            total_price=total_price,
-            notes=notes
-        )
-        
+        match = None
         if match_id:
-            try:
-                booking.match = Match.objects.get(id=match_id)
-                booking.save()
-            except Match.DoesNotExist:
-                pass
+            match = Match.objects.filter(id=match_id).first()
+            if match and match.organizer_id != request.user.id:
+                return Response({'error': 'Only the match organizer can attach this match'},
+                                status=status.HTTP_403_FORBIDDEN)
+
+        # Guard against double-booking the same slot.
+        with transaction.atomic():
+            if _has_conflict(venue, booking_date, start_time, end_time):
+                return Response({
+                    'error': 'That slot is already booked. Pick another time.',
+                }, status=status.HTTP_409_CONFLICT)
+
+            slots = max(1, hours // BOOKING_SLOT_HOURS)
+            total_price = money(Decimal(venue.slot_price) * slots)
+
+            booking = VenueBooking.objects.create(
+                venue=venue,
+                booked_by=request.user,
+                date=booking_date,
+                start_time=start_time,
+                end_time=end_time,
+                hours=hours,
+                total_price=total_price,
+                notes=notes,
+                match=match,
+            )
         
+        track(request.user, 'booking_created', {
+            'venue_id': venue.id, 'price': float(total_price), 'hours': hours,
+        })
+
         # Create notification for venue owner
         Notification.objects.create(
             user=venue.owner,
@@ -340,13 +390,29 @@ def get_venue_bookings(request):
     """
     try:
         as_owner = request.query_params.get('as', 'owner')
-        
+        venue_id = request.query_params.get('venue_id')
+        status_filter = request.query_params.get('status')
+        scope = request.query_params.get('scope')
+
         if as_owner == 'owner':
             venues = Venue.objects.filter(owner=request.user).select_related('owner')
-            bookings = VenueBooking.objects.filter(venue__in=venues).select_related('venue', 'match', 'booked_by')
+            bookings = VenueBooking.objects.filter(venue__in=venues)
         else:
-            bookings = VenueBooking.objects.filter(booked_by=request.user).select_related('venue', 'match', 'booked_by')
-        
+            bookings = VenueBooking.objects.filter(booked_by=request.user)
+
+        if venue_id:
+            bookings = bookings.filter(venue_id=venue_id)
+        if status_filter:
+            bookings = bookings.filter(status=status_filter)
+
+        today = timezone.localdate()
+        if scope == 'upcoming':
+            bookings = bookings.filter(date__gte=today)
+        elif scope == 'past':
+            bookings = bookings.filter(date__lt=today)
+
+        bookings = bookings.select_related('venue', 'match', 'booked_by').order_by('-date', '-start_time')
+
         return Response({
             'success': True,
             'bookings': [_venue_booking_to_dict(b) for b in bookings]
@@ -356,6 +422,29 @@ def get_venue_bookings(request):
         return Response({'error': _err_msg(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+
+
+def _apply_cancellation_policy(booking, request):
+    """Charge the venue's late-cancellation fee when applicable."""
+    venue = booking.venue
+    window = venue.cancellation_hours or 0
+    percent = venue.cancellation_fee_percent or 0
+    if window <= 0 or percent <= 0:
+        return money(0)
+
+    booking_dt = timezone.make_aware(datetime.combine(booking.date, booking.start_time))
+    hours = (booking_dt - timezone.now()).total_seconds() / 3600
+    if hours >= window:
+        return money(0)
+
+    fee = money(Decimal(booking.total_price) * Decimal(percent) / Decimal(100))
+    if fee > 0:
+        record_transaction(
+            'cancellation_fee', fee, payer=request.user,
+            reference_type='venue_booking', reference_id=booking.id,
+            note=f'Late cancellation (<{window}h) at {venue.name}',
+        )
+    return fee
 
 
 @api_view(['POST'])
@@ -372,17 +461,47 @@ def update_venue_booking(request, booking_id):
         
         booking = VenueBooking.objects.get(id=booking_id)
         
-        if booking.venue.owner != request.user and booking.booked_by != request.user:
+        is_owner = booking.venue.owner_id == request.user.id
+        is_booker = booking.booked_by_id == request.user.id
+        if not is_owner and not is_booker:
             return Response({'error': 'Not authorized'}, status=status.HTTP_403_FORBIDDEN)
-        
+
+        if new_status == booking.status:
+            return Response({'success': True, 'booking': _venue_booking_to_dict(booking)})
+
+        allowed_from = {
+            'confirmed': ['pending'],
+            'cancelled': ['pending', 'confirmed'],
+        }
+        if booking.status not in allowed_from[new_status]:
+            return Response({'error': f'Cannot change a {booking.status} booking to {new_status}'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if new_status == 'confirmed' and not is_owner:
+            return Response({'error': 'Only the venue owner can confirm bookings'},
+                            status=status.HTTP_403_FORBIDDEN)
+
+        cancellation_fee = None
+        if new_status == 'cancelled':
+            cancellation_fee = _apply_cancellation_policy(booking, request)
+            if booking.payment_status == 'paid':
+                booking.payment_status = 'refunded'
+                record_transaction(
+                    'venue_commission', money(booking.total_price),
+                    payer=request.user, reference_type='venue_booking',
+                    reference_id=booking.id, status='refunded',
+                    note=f'Booking refunded at {booking.venue.name}',
+                )
+
         booking.status = new_status
         booking.save()
-        
-        return Response({
+
+        payload = {
             'success': True,
-            'booking': _venue_booking_to_dict(booking)
-        })
-        
+            'booking': _venue_booking_to_dict(booking),
+        }
+        if cancellation_fee is not None:
+            payload['cancellation_fee'] = str(cancellation_fee)
+        return Response(payload)        
     except VenueBooking.DoesNotExist:
         return Response({'error': 'Booking not found'}, status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
@@ -397,7 +516,11 @@ def rate_venue(request, venue_id):
     Rate a venue
     """
     try:
-        rating_value = int(request.data.get('rating'))
+        try:
+            rating_value = int(request.data.get('rating'))
+        except (TypeError, ValueError):
+            return Response({'error': 'rating must be an integer between 1 and 5'},
+                            status=status.HTTP_400_BAD_REQUEST)
         comment = sanitize_text(request.data.get('comment', ''))
         
         try:
@@ -409,6 +532,15 @@ def rate_venue(request, venue_id):
             return Response({'error': 'Rating must be between 1 and 5'}, status=status.HTTP_400_BAD_REQUEST)
         
         venue = Venue.objects.get(id=venue_id)
+        
+        # You can only rate a venue you have actually booked.
+        has_booking = VenueBooking.objects.filter(
+            venue=venue, booked_by=request.user,
+            status__in=['confirmed', 'completed'],
+        ).exists()
+        if not has_booking:
+            return Response({'error': 'You can only rate a venue you have booked'},
+                            status=status.HTTP_403_FORBIDDEN)
         
         rating, created = VenueRating.objects.get_or_create(
             venue=venue,
@@ -439,3 +571,223 @@ def rate_venue(request, venue_id):
 
 
 # ── Tournament System ──
+
+
+# ── Venue owner: schedule + revenue ──────────────────────────────────────
+
+def _schedule_for_day(venue, day, bookings):
+    """Every 2-hour slot for a day, marked booked/free."""
+    opening = venue.opening_time or time(8, 0)
+    closing = venue.closing_time or time(22, 0)
+    cursor = datetime.combine(day, opening)
+    end_of_day = datetime.combine(day, closing)
+    slots = []
+    while cursor + timedelta(hours=BOOKING_SLOT_HOURS) <= end_of_day:
+        slot_end = cursor + timedelta(hours=BOOKING_SLOT_HOURS)
+        hit = None
+        for b in bookings:
+            b_start = datetime.combine(day, b.start_time)
+            b_end = datetime.combine(day, b.end_time)
+            if cursor < b_end and slot_end > b_start:
+                hit = b
+                break
+        slots.append({
+            'start': cursor.strftime('%H:%M'),
+            'end': slot_end.strftime('%H:%M'),
+            'status': 'booked' if hit else 'free',
+            'booking': {
+                'id': hit.id,
+                'status': hit.status,
+                'booked_by': display_name(hit.booked_by) if hit.booked_by else '',
+                'match_id': hit.match_id,
+                'match_title': hit.match.title if hit.match else None,
+                'price': str(hit.total_price),
+            } if hit else None,
+        })
+        cursor = slot_end
+    return slots
+
+
+@api_view(['GET'])
+def venue_schedule(request, venue_id):
+    """Day-by-day slot grid for a venue (owner only)."""
+    try:
+        venue = Venue.objects.get(id=venue_id)
+    except Venue.DoesNotExist:
+        return Response({'error': 'Venue not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if venue.owner != request.user:
+        return Response({'error': 'Only the venue owner can view the schedule'},
+                        status=status.HTTP_403_FORBIDDEN)
+
+    def parse_date(value, fallback):
+        if not value:
+            return fallback
+        try:
+            return datetime.strptime(value, '%Y-%m-%d').date()
+        except (ValueError, TypeError):
+            return fallback
+
+    today = timezone.localdate()
+    from_date = parse_date(request.query_params.get('from'), today)
+    to_date = parse_date(request.query_params.get('to'), from_date + timedelta(days=6))
+    if to_date < from_date:
+        from_date, to_date = to_date, from_date
+    if (to_date - from_date).days > 60:
+        to_date = from_date + timedelta(days=60)
+
+    bookings = list(VenueBooking.objects.filter(
+        venue=venue, date__gte=from_date, date__lte=to_date,
+        status__in=['pending', 'confirmed', 'completed'],
+    ).select_related('booked_by', 'match'))
+
+    days = []
+    day = from_date
+    while day <= to_date:
+        day_bookings = [b for b in bookings if b.date == day]
+        slots = _schedule_for_day(venue, day, day_bookings)
+        booked = sum(1 for s in slots if s['status'] == 'booked')
+        days.append({
+            'date': day.isoformat(),
+            'weekday': day.strftime('%a'),
+            'slots': slots,
+            'booked': booked,
+            'free': len(slots) - booked,
+            'revenue': str(money(sum(
+                b.total_price for b in day_bookings if b.status in ('confirmed', 'completed')))),
+        })
+        day += timedelta(days=1)
+
+    return Response({
+        'success': True,
+        'venue': {
+            'id': venue.id, 'name': venue.name,
+            'slot_price': str(venue.slot_price),
+            'opening': (venue.opening_time or time(8, 0)).strftime('%H:%M'),
+            'closing': (venue.closing_time or time(22, 0)).strftime('%H:%M'),
+        },
+        'from': from_date.isoformat(),
+        'to': to_date.isoformat(),
+        'days': days,
+    })
+
+
+@api_view(['GET'])
+def venue_revenue(request):
+    """Revenue breakdown for the owner: per venue + per month."""
+    venues = list(Venue.objects.filter(owner=request.user))
+    if not venues:
+        return Response({'success': True, 'total_collected': '0.00', 'total_pending': '0.00',
+                         'by_venue': [], 'by_month': []})
+
+    bookings = list(VenueBooking.objects.filter(venue__in=venues).select_related('venue'))
+
+    def bucket(items):
+        collected = money(sum(b.total_price for b in items if b.status in ('confirmed', 'completed')))
+        pending = money(sum(b.total_price for b in items if b.status == 'pending'))
+        return collected, pending
+
+    by_venue = []
+    for v in venues:
+        vq = [b for b in bookings if b.venue_id == v.id]
+        collected, pending = bucket(vq)
+        by_venue.append({
+            'venue_id': v.id, 'name': v.name, 'city': v.city,
+            'bookings': len(vq), 'collected': str(collected), 'pending': str(pending),
+            'verification_status': v.verification_status,
+            'average_rating': str(v.average_rating),
+        })
+
+    months = {}
+    for b in bookings:
+        months.setdefault(b.date.strftime('%Y-%m'), []).append(b)
+    by_month = []
+    for key in sorted(months.keys(), reverse=True)[:12]:
+        collected, pending = bucket(months[key])
+        by_month.append({'month': key, 'bookings': len(months[key]),
+                         'collected': str(collected), 'pending': str(pending)})
+
+    all_collected, all_pending = bucket(bookings)
+    return Response({
+        'success': True,
+        'total_collected': str(all_collected),
+        'total_pending': str(all_pending),
+        'by_venue': by_venue,
+        'by_month': by_month,
+    })
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def venue_availability(request, venue_id):
+    """Public availability for a venue.
+
+    ?date=YYYY-MM-DD            -> single day
+    ?from=YYYY-MM-DD&to=...     -> range (week strip)
+    """
+    try:
+        venue = Venue.objects.get(id=venue_id, is_active=True)
+    except Venue.DoesNotExist:
+        return Response({'error': 'Venue not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    def parse_date(value, fallback):
+        if not value:
+            return fallback
+        try:
+            return datetime.strptime(value, '%Y-%m-%d').date()
+        except (ValueError, TypeError):
+            return fallback
+
+    today = timezone.localdate()
+    from_str = request.query_params.get('from')
+    to_str = request.query_params.get('to')
+
+    if from_str or to_str:
+        from_date = parse_date(from_str, today)
+        to_date = parse_date(to_str, from_date + timedelta(days=6))
+        if to_date < from_date:
+            from_date, to_date = to_date, from_date
+        if (to_date - from_date).days > 30:
+            to_date = from_date + timedelta(days=30)
+
+        bookings = list(VenueBooking.objects.filter(
+            venue=venue, date__gte=from_date, date__lte=to_date,
+            status__in=['pending', 'confirmed']))
+
+        days = []
+        day = from_date
+        while day <= to_date:
+            day_bookings = [b for b in bookings if b.date == day]
+            slots = [{'start': s['start'], 'end': s['end'], 'status': s['status']}
+                     for s in _schedule_for_day(venue, day, day_bookings)]
+            days.append({
+                'date': day.isoformat(),
+                'weekday': day.strftime('%a'),
+                'slots': slots,
+                'free': sum(1 for s in slots if s['status'] == 'free'),
+                'booked': sum(1 for s in slots if s['status'] == 'booked'),
+            })
+            day += timedelta(days=1)
+
+        return Response({
+            'success': True,
+            'venue': {'id': venue.id, 'name': venue.name, 'slot_price': str(venue.slot_price)},
+            'from': from_date.isoformat(),
+            'to': to_date.isoformat(),
+            'days': days,
+        })
+
+    target = parse_date(request.query_params.get('date'), today)
+    bookings = list(VenueBooking.objects.filter(
+        venue=venue, date=target, status__in=['pending', 'confirmed']))
+    slots = [{'start': s['start'], 'end': s['end'], 'status': s['status']}
+             for s in _schedule_for_day(venue, target, bookings)]
+
+    return Response({
+        'success': True,
+        'venue': {'id': venue.id, 'name': venue.name, 'slot_price': str(venue.slot_price)},
+        'date': target.isoformat(),
+        'slots': slots,
+        'free': sum(1 for s in slots if s['status'] == 'free'),
+        'booked': sum(1 for s in slots if s['status'] == 'booked'),
+    })

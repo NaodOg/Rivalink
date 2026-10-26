@@ -3,7 +3,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from django.contrib.auth.models import User
-from .models import Match, Notification, Referee, RefereeBooking, RefereeRating
+from .models import Match, MatchParticipant, Notification, Referee, RefereeBooking, RefereeRating
 from .monetization import (
     referee_commission, record_transaction,
 )
@@ -136,6 +136,13 @@ def book_referee(request):
         referee = Referee.objects.get(id=referee_id)
         match = Match.objects.get(id=match_id)
         
+        # Only the match organizer (or a participant) may book a referee for it.
+        is_organizer = match.organizer_id == request.user.id
+        is_participant = MatchParticipant.objects.filter(match=match, user=request.user).exists()
+        if not is_organizer and not is_participant:
+            return Response({'error': 'Only match participants can book a referee for this match'},
+                            status=status.HTTP_403_FORBIDDEN)
+        
         if not referee.is_available:
             return Response({'error': 'Referee is not available'}, status=status.HTTP_400_BAD_REQUEST)
         
@@ -225,13 +232,29 @@ def update_booking_status(request, booking_id):
         
         booking = RefereeBooking.objects.get(id=booking_id)
         
-        # Only referee can accept/decline, only booker can cancel
+        allowed_from = {
+            'accepted': ['pending'],
+            'declined': ['pending'],
+            'completed': ['accepted'],
+            'cancelled': ['pending', 'accepted'],
+        }
+        if booking.status not in allowed_from[new_status]:
+            return Response({
+                'error': f'Cannot mark a {booking.status} booking as {new_status}',
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Accepted/declined: referee only. Cancelled: booker only.
+        # Completed: booker only (confirms the referee actually officiated).
         if new_status in ['accepted', 'declined']:
             if booking.referee.user != request.user:
                 return Response({'error': 'Only referee can accept/decline'}, status=status.HTTP_403_FORBIDDEN)
         elif new_status == 'cancelled':
             if booking.booked_by != request.user:
                 return Response({'error': 'Only booker can cancel'}, status=status.HTTP_403_FORBIDDEN)
+        elif new_status == 'completed':
+            if booking.booked_by != request.user:
+                return Response({'error': 'Only the booker can mark a booking completed'},
+                                status=status.HTTP_403_FORBIDDEN)
         
         booking.status = new_status
         booking.save()
@@ -269,7 +292,11 @@ def rate_referee(request, booking_id):
     Rate a referee after match completion
     """
     try:
-        rating_value = int(request.data.get('rating'))
+        try:
+            rating_value = int(request.data.get('rating'))
+        except (TypeError, ValueError):
+            return Response({'error': 'rating must be an integer between 1 and 5'},
+                            status=status.HTTP_400_BAD_REQUEST)
         comment = sanitize_text(request.data.get('comment', ''))
         
         try:

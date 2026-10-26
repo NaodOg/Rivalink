@@ -123,6 +123,18 @@ class PFIcons {
   return (label: 'Bronze', color: PFColors.bronze);
 }
 
+/// Progress toward the next tier: 0..1 fraction, points remaining, next label.
+({double fraction, int remaining, String nextLabel}) pfEloProgress(int elo) {
+  if (elo >= 1600) return (fraction: 1.0, remaining: 0, nextLabel: 'Top tier');
+  if (elo >= 1400) {
+    return (fraction: (elo - 1400) / 200, remaining: 1600 - elo, nextLabel: 'Platinum');
+  }
+  if (elo >= 1200) {
+    return (fraction: (elo - 1200) / 200, remaining: 1400 - elo, nextLabel: 'Gold');
+  }
+  return (fraction: (elo / 1200).clamp(0.0, 1.0), remaining: 1200 - elo, nextLabel: 'Silver');
+}
+
 /// 4pt spacing scale.
 class PFSpacing {
   PFSpacing._();

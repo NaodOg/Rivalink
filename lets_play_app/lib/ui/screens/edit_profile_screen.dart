@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -94,6 +95,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final resolvedImage = MediaConfig.resolve(_existingImageUrl);
     return PFScaffold(
       appBar: AppBar(
         leading: IconButton(
@@ -116,9 +118,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     backgroundColor: PFColors.cardSoft,
                     backgroundImage: _newImage != null
                         ? FileImage(File(_newImage!.path))
-                        : (_existingImageUrl != null && _existingImageUrl!.isNotEmpty
-                            ? NetworkImage(MediaConfig.resolve(_existingImageUrl!)!)
-                            : null),
+                        : (resolvedImage != null ? CachedNetworkImageProvider(resolvedImage) : null),
                     child: (_newImage == null && (_existingImageUrl == null || _existingImageUrl!.isEmpty))
                         ? const Icon(Icons.person_rounded, size: 48, color: PFColors.muted)
                         : null,

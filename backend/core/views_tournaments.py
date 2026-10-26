@@ -3,7 +3,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from django.db import transaction
-from .models import Team, Tournament, TournamentTeam, TournamentMatch
+from .models import Team, TeamMember, Tournament, TournamentTeam, TournamentMatch
 from .monetization import (
     tournament_fee, record_transaction,
 )
@@ -219,6 +219,13 @@ def register_team_tournament(request):
             
             team = Team.objects.get(id=team_id)
             
+            is_owner = team.owner_id == request.user.id
+            is_admin = TeamMember.objects.filter(
+                team=team, user=request.user, role__in=['owner', 'admin']).exists()
+            if not is_owner and not is_admin:
+                return Response({'error': 'Only team owners/admins can register this team'},
+                                status=status.HTTP_403_FORBIDDEN)
+            
             if TournamentTeam.objects.filter(tournament=tournament, team=team).exists():
                 return Response({'error': 'Team already registered'}, status=status.HTTP_400_BAD_REQUEST)
             
@@ -270,6 +277,14 @@ def start_tournament(request, tournament_id):
         if tournament.status == 'live':
             return Response({'error': 'Tournament already started'}, status=status.HTTP_400_BAD_REQUEST)
         
+        if tournament.status == 'completed':
+            return Response({'error': 'Tournament is already completed'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Never regenerate a bracket that already exists (avoids duplicate rows).
+        if TournamentMatch.objects.filter(tournament=tournament).exists():
+            return Response({'error': 'This tournament already has a bracket'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        
         tournament.status = 'live'
         tournament.save()
         
@@ -302,8 +317,19 @@ def update_match_result(request, match_id):
         if match.tournament.organizer != request.user:
             return Response({'error': 'Not authorized'}, status=status.HTTP_403_FORBIDDEN)
         
-        score1 = int(request.data.get('score1', 0))
-        score2 = int(request.data.get('score2', 0))
+        try:
+            score1 = validate_int(request.data.get('score1', 0), 0, 9999, 'score1')
+            score2 = validate_int(request.data.get('score2', 0), 0, 9999, 'score2')
+        except ValueError as e:
+            return Response({'error': _err_msg(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not match.team1 or not match.team2:
+            return Response({'error': 'Both teams must be set before recording a result'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        if match.status == 'completed':
+            return Response({'error': 'Match result already recorded'},
+                            status=status.HTTP_400_BAD_REQUEST)
 
         if score1 == score2:
             return Response({'error': 'Ties are not allowed in elimination brackets'}, status=status.HTTP_400_BAD_REQUEST)

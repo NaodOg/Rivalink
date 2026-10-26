@@ -181,3 +181,19 @@ def validate_boolean(value, field_name='Field'):
 
 def validate_favorite_type(value):
     return validate_enum(value, FAVORITE_TYPES, 'favorite_type')
+
+
+SCORE_REGEX = re.compile(r'^\s*(\d{1,3})\s*-\s*(\d{1,3})\s*$')
+
+
+def validate_score(score):
+    """Validate + normalize a score to 'A - B'. Empty/None -> ''."""
+    if score is None:
+        return ''
+    s = str(score).strip()
+    if not s:
+        return ''
+    m = SCORE_REGEX.match(s)
+    if not m:
+        raise ValueError('Score must look like "3 - 2"')
+    return f"{int(m.group(1))} - {int(m.group(2))}"

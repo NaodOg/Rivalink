@@ -9,6 +9,7 @@ from django.db import IntegrityError
 from django.conf import settings
 from .models import UserProfile, Referral
 from .audit import log_event
+from .analytics import track
 from .serializers import (
     err_msg as _err_msg,
 )
@@ -90,6 +91,9 @@ def signup(request):
         token, created = Token.objects.get_or_create(user=user)
 
         log_event(request, 'signup', user, 'ok')
+        track(user, 'signup_completed', {
+            'referral': bool(request.data.get('referral_code')),
+        })
 
         return Response({
             'message': 'Account created successfully',

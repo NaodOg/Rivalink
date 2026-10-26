@@ -8,6 +8,7 @@ from django.conf import settings
 from django.utils import timezone
 from datetime import timedelta
 import random
+import secrets
 from .models import (
     UserProfile, Team, TeamMember, Match, MatchParticipant, Notification,
     League, LeagueMember, PlayerRating, MatchResult, Favorite, DirectMessage,
@@ -213,12 +214,8 @@ def get_individual_rankings(request):
     if sport and sport not in [c[0] for c in Match.SPORT_CHOICES]:
         return Response({'error': 'Invalid sport'}, status=status.HTTP_400_BAD_REQUEST)
 
-    now = timezone.now()
-    qs = UserSportRating.objects.select_related('user').filter(
-        Q(user__profile__is_premium=True),
-    ).filter(
-        Q(user__profile__premium_expires__isnull=True) | Q(user__profile__premium_expires__gt=now)
-    )
+    # Everyone who has actually played is ranked (not just premium).
+    qs = UserSportRating.objects.select_related('user').filter(matches_played__gt=0)
     if sport:
         qs = qs.filter(sport=sport)
     else:
@@ -595,6 +592,12 @@ def register_device(request):
     device_type = (request.data.get('device_type') or 'android')
     if device_type not in ('android', 'ios', 'web'):
         device_type = 'android'
+    # A device token belongs to one user. Refuse to hijack another user's
+    # active token; allow takeover only after the previous owner unregistered it.
+    existing = DeviceToken.objects.filter(token=token).first()
+    if existing and existing.user_id != request.user.id and existing.is_active:
+        return Response({'error': 'This device token is registered to another account'},
+                        status=status.HTTP_409_CONFLICT)
     DeviceToken.objects.update_or_create(
         token=token,
         defaults={'user': request.user, 'device_type': device_type, 'is_active': True},
@@ -620,7 +623,7 @@ def run_reminders(request):
     """External-cron entry point (no Celery in this stack). Protected by a secret."""
     secret = getattr(settings, 'REMINDER_SECRET', '')
     provided = request.headers.get('X-Reminder-Secret') or request.data.get('secret', '')
-    if not secret or provided != secret:
+    if not secret or not provided or not secrets.compare_digest(str(provided), str(secret)):
         return Response({'error': 'unauthorized'}, status=status.HTTP_401_UNAUTHORIZED)
 
     from io import StringIO

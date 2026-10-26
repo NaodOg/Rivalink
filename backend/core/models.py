@@ -25,6 +25,8 @@ class UserProfile(models.Model):
     reset_token = models.CharField(max_length=64, blank=True, default='')
     reset_token_expires = models.DateTimeField(null=True, blank=True)
     no_show_count = models.IntegerField(default=0)
+    host_cancel_count = models.IntegerField(default=0)
+    host_suspended_until = models.DateTimeField(null=True, blank=True)
     referral_code = models.CharField(max_length=12, unique=True, null=True, blank=True)
     referral_credit = models.IntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -131,6 +133,10 @@ class Match(models.Model):
     date_time = models.DateTimeField()
     max_players = models.IntegerField(default=10)
     current_players = models.IntegerField(default=0)
+    min_players = models.IntegerField(default=0)  # 0 = no minimum
+    auto_cancel_hours = models.IntegerField(default=6)
+    cancelled_reason = models.CharField(max_length=200, blank=True, default='')
+    cancelled_at = models.DateTimeField(null=True, blank=True)
     price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     skill_level = models.CharField(
         max_length=20,
@@ -144,6 +150,22 @@ class Match(models.Model):
     )
     organizer = models.ForeignKey(User, on_delete=models.CASCADE, related_name='organized_matches')
     team = models.ForeignKey(Team, on_delete=models.SET_NULL, null=True, blank=True, related_name='matches')
+    league = models.ForeignKey('League', on_delete=models.SET_NULL, null=True, blank=True,
+                               related_name='matches')
+    venue = models.ForeignKey('Venue', on_delete=models.SET_NULL, null=True, blank=True,
+                              related_name='hosted_matches')
+    booking_status = models.CharField(
+        max_length=20,
+        choices=[
+            ('none', 'Not requested'),
+            ('requested', 'Awaiting player confirmations'),
+            ('confirmed', 'Field booked'),
+            ('cancelled', 'Cancelled'),
+        ],
+        default='none',
+    )
+    booking_requested_at = models.DateTimeField(null=True, blank=True)
+    booking_confirmed_at = models.DateTimeField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
     reminder_sent = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -160,9 +182,24 @@ class Match(models.Model):
 
 
 class MatchParticipant(models.Model):
+    PAYMENT_STATUS_CHOICES = [
+        ('unpaid', 'Unpaid'),
+        ('held', 'In escrow'),
+        ('released', 'Released to host'),
+        ('refunded', 'Refunded'),
+        ('partially_refunded', 'Partially refunded'),
+        ('forfeited', 'Forfeited'),
+    ]
+
     match = models.ForeignKey(Match, on_delete=models.CASCADE, related_name='participants')
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='joined_matches')
     team_group = models.CharField(max_length=10, blank=True, default='')
+    paid = models.BooleanField(default=False)
+    paid_at = models.DateTimeField(null=True, blank=True)
+    amount_paid = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    payment_status = models.CharField(max_length=20, choices=PAYMENT_STATUS_CHOICES, default='unpaid')
+    booking_confirmed = models.BooleanField(default=False)
+    booking_confirmed_at = models.DateTimeField(null=True, blank=True)
     joined_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -249,6 +286,12 @@ class League(models.Model):
         ('esports', 'Esports'),
         ('other', 'Other'),
     ]
+    STATUS_CHOICES = [
+        ('registration', 'Registration Open'),
+        ('live', 'Live'),
+        ('completed', 'Completed'),
+        ('cancelled', 'Cancelled'),
+    ]
     
     name = models.CharField(max_length=200)
     sport = models.CharField(max_length=50, choices=SPORT_CHOICES)
@@ -260,6 +303,12 @@ class League(models.Model):
     prize = models.TextField(blank=True)  # e.g., "$500 prize pool"
     start_date = models.DateTimeField()
     end_date = models.DateTimeField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='registration')
+    points_win = models.IntegerField(default=3)
+    points_draw = models.IntegerField(default=1)
+    double_round_robin = models.BooleanField(default=False)
+    champion = models.ForeignKey('Team', on_delete=models.SET_NULL, null=True, blank=True,
+                                 related_name='league_titles')
     is_active = models.BooleanField(default=True)
     organizer = models.ForeignKey(User, on_delete=models.CASCADE, related_name='organized_leagues')
     location = models.CharField(max_length=200, blank=True)
@@ -273,6 +322,34 @@ class League(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.sport})"
+
+
+class LeagueFixture(models.Model):
+    """A single league match between two teams (round-robin schedule)."""
+    STATUS_CHOICES = [
+        ('scheduled', 'Scheduled'),
+        ('completed', 'Completed'),
+    ]
+
+    league = models.ForeignKey(League, on_delete=models.CASCADE, related_name='fixtures')
+    round_number = models.IntegerField(default=1)
+    home_team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name='home_fixtures')
+    away_team = models.ForeignKey(Team, on_delete=models.CASCADE, related_name='away_fixtures')
+    kickoff = models.DateTimeField(null=True, blank=True)
+    match = models.ForeignKey('Match', on_delete=models.SET_NULL, null=True, blank=True,
+                              related_name='league_fixture')
+    home_score = models.IntegerField(null=True, blank=True)
+    away_score = models.IntegerField(null=True, blank=True)
+    is_walkover = models.BooleanField(default=False)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='scheduled')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['round_number', 'kickoff', 'id']
+        indexes = [models.Index(fields=['league', 'status'])]
+
+    def __str__(self):
+        return f"{self.home_team.name} vs {self.away_team.name} (R{self.round_number})"
 
 
 class LeagueMember(models.Model):
@@ -292,6 +369,7 @@ class LeagueMember(models.Model):
     goals_for = models.IntegerField(default=0)
     goals_against = models.IntegerField(default=0)
     matches_played = models.IntegerField(default=0)
+    prev_rank = models.IntegerField(default=0)  # rank before the latest result
     joined_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -356,22 +434,57 @@ class MatchResult(models.Model):
         ('individual', 'Individual Winner'),
         ('draw', 'Draw'),
     ]
-    
+    STATUS_CHOICES = [
+        ('pending', 'Pending confirmation'),
+        ('confirmed', 'Confirmed'),
+        ('disputed', 'Disputed'),
+    ]
+
     match = models.OneToOneField(Match, on_delete=models.CASCADE, related_name='result')
     match_type = models.CharField(max_length=20, choices=MATCH_TYPE_CHOICES, default='pickup')
     result_type = models.CharField(max_length=20, choices=RESULT_TYPE_CHOICES, default='individual')
     winner_team = models.ForeignKey(Team, on_delete=models.SET_NULL, null=True, blank=True, related_name='winner_results')
     winner_user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='winner_results')
+    team1 = models.ForeignKey(Team, on_delete=models.SET_NULL, null=True, blank=True, related_name='result_team1')
+    team2 = models.ForeignKey(Team, on_delete=models.SET_NULL, null=True, blank=True, related_name='result_team2')
     winning_group = models.CharField(max_length=10, blank=True, default='')
     mvp_user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='mvp_results')
     score = models.CharField(max_length=50, blank=True)
+    no_show_user_ids = models.CharField(max_length=500, blank=True, default='')  # comma-separated
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    rankings_applied = models.BooleanField(default=False)
+    confirmed_at = models.DateTimeField(null=True, blank=True)
     notes = models.TextField(blank=True)
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    @property
+    def no_show_list(self):
+        return [int(x) for x in self.no_show_user_ids.split(',') if x.strip().isdigit()]
+
     def __str__(self):
         return f"Result for {self.match.title}: {self.score}"
+
+
+class MatchResultConfirmation(models.Model):
+    """A participant's confirm/dispute vote on a match result."""
+    STATUS_CHOICES = [
+        ('confirmed', 'Confirmed'),
+        ('disputed', 'Disputed'),
+    ]
+
+    result = models.ForeignKey(MatchResult, on_delete=models.CASCADE, related_name='confirmations')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='result_confirmations')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='confirmed')
+    note = models.CharField(max_length=300, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('result', 'user')
+
+    def __str__(self):
+        return f"{self.user.username} {self.status} {self.result_id}"
 
 
 class DirectMessage(models.Model):
@@ -484,6 +597,8 @@ class Venue(models.Model):
     images = models.TextField(blank=True, default='')  # comma-separated URLs
     opening_time = models.TimeField(null=True, blank=True)
     closing_time = models.TimeField(null=True, blank=True)
+    cancellation_hours = models.IntegerField(default=24)
+    cancellation_fee_percent = models.IntegerField(default=0)
     is_active = models.BooleanField(default=True)
     is_available = models.BooleanField(default=True)
     verification_status = models.CharField(max_length=20, choices=VERIFICATION_STATUS_CHOICES, default='pending')
@@ -518,6 +633,11 @@ class VenueBooking(models.Model):
         ('completed', 'Completed'),
         ('cancelled', 'Cancelled'),
     ]
+    PAYMENT_STATUS_CHOICES = [
+        ('unpaid', 'Unpaid'),
+        ('paid', 'Paid'),
+        ('refunded', 'Refunded'),
+    ]
     
     venue = models.ForeignKey(Venue, on_delete=models.CASCADE, related_name='bookings')
     match = models.ForeignKey(Match, on_delete=models.SET_NULL, null=True, blank=True, related_name='venue_booking')
@@ -528,6 +648,8 @@ class VenueBooking(models.Model):
     hours = models.IntegerField(default=1)
     total_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    payment_status = models.CharField(max_length=20, choices=PAYMENT_STATUS_CHOICES, default='unpaid')
+    paid_at = models.DateTimeField(null=True, blank=True)
     notes = models.TextField(blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -662,6 +784,9 @@ class UserSportRating(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='sport_ratings')
     sport = models.CharField(max_length=50)
     elo_rating = models.IntegerField(default=1200)
+    rating_deviation = models.FloatField(default=350.0)
+    volatility = models.FloatField(default=0.06)
+    last_rated_at = models.DateTimeField(null=True, blank=True)
     matches_played = models.IntegerField(default=0)
     wins = models.IntegerField(default=0)
     losses = models.IntegerField(default=0)
@@ -711,11 +836,13 @@ class Payment(models.Model):
     PAYMENT_TYPES = [
         ('premium', 'Premium Subscription'),
         ('venue_booking', 'Venue Booking'),
+        ('match_share', 'Match Share (escrow)'),
     ]
     STATUS_CHOICES = [
         ('pending', 'Pending'),
         ('success', 'Success'),
         ('failed', 'Failed'),
+        ('refunded', 'Refunded'),
     ]
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='payments')
@@ -724,6 +851,8 @@ class Payment(models.Model):
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     currency = models.CharField(max_length=10, default='ETB')
     payment_type = models.CharField(max_length=20, choices=PAYMENT_TYPES)
+    reference_type = models.CharField(max_length=32, blank=True, default='')
+    reference_id = models.IntegerField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     description = models.CharField(max_length=500, blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
@@ -741,8 +870,12 @@ class PlatformTransaction(models.Model):
         ('host_fee', 'Match Host Fee'),
         ('referee_commission', 'Referee Booking Commission'),
         ('tournament_fee', 'Tournament Entry Fee'),
+        ('league_fee', 'League Entry Fee'),
         ('premium', 'Premium Subscription'),
         ('featured_listing', 'Featured Listing'),
+        ('match_share', 'Match Share Escrow'),
+        ('cancellation_fee', 'Cancellation Fee'),
+        ('host_penalty', 'Host Penalty (owed)'),
     ]
     STATUS_CHOICES = [
         ('pending', 'Pending'),
@@ -770,6 +903,31 @@ class PlatformTransaction(models.Model):
 
     def __str__(self):
         return f"{self.get_kind_display()}: {self.amount} {self.currency} ({self.status})"
+
+
+class AnalyticsEvent(models.Model):
+    """One product-analytics event (client batch or server-side action)."""
+
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
+                             related_name='analytics_events')
+    anon_id = models.CharField(max_length=64, blank=True, default='', db_index=True)
+    session_id = models.CharField(max_length=64, blank=True, default='')
+    name = models.CharField(max_length=80)
+    properties = models.JSONField(default=dict, blank=True)
+    platform = models.CharField(max_length=20, default='android')
+    app_version = models.CharField(max_length=20, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['name', 'created_at']),
+            models.Index(fields=['user', 'created_at']),
+            models.Index(fields=['created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.name} — {self.created_at:%Y-%m-%d %H:%M}"
 
 
 class AuditLog(models.Model):
@@ -855,3 +1013,60 @@ class Referral(models.Model):
 
     def __str__(self):
         return f"{self.referrer.username} referred {self.referred.username if self.referred else '—'}"
+
+
+class RecommendationExposure(models.Model):
+    """A ranked match that was actually shown to a user (for learning labels)."""
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE,
+                             related_name='recommendation_exposures')
+    match = models.ForeignKey(Match, on_delete=models.CASCADE,
+                              related_name='recommendation_exposures')
+    surface = models.CharField(max_length=30, default='recommendations')
+    variant = models.CharField(max_length=20, blank=True, default='')
+    score = models.FloatField(default=0)
+    features = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', 'created_at']),
+            models.Index(fields=['match', 'created_at']),
+        ]
+
+    def __str__(self):
+        return f'{self.user.username} saw {self.match_id} ({self.surface})'
+
+
+class ModelArtifact(models.Model):
+    """Trained model weights + metadata (pure-Python models, no ML service)."""
+
+    name = models.CharField(max_length=50, unique=True)
+    weights = models.JSONField(default=dict, blank=True)
+    meta = models.JSONField(default=dict, blank=True)
+    samples = models.IntegerField(default=0)
+    trained_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f'{self.name} ({self.samples} samples)'
+
+
+class NotificationBandit(models.Model):
+    """Beta(alpha, beta) posterior for one notification arm."""
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE,
+                             related_name='notification_bandits')
+    experiment = models.CharField(max_length=50, default='send_time')
+    arm = models.CharField(max_length=30)
+    alpha = models.IntegerField(default=1)
+    beta = models.IntegerField(default=1)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('user', 'experiment', 'arm')
+        ordering = ['-updated_at']
+
+    def __str__(self):
+        return f'{self.user.username} {self.experiment}:{self.arm} ({self.alpha}/{self.beta})'
+

@@ -10,6 +10,7 @@ import '../services/user_stats_service.dart';
 import '../services/venue_service.dart';
 import '../services/social_service.dart';
 import '../services/phone_verify_service.dart';
+import '../services/engagement_service.dart';
 import '../../models/ui_models.dart';
 
 class AppRepository {
@@ -35,13 +36,17 @@ class AppRepository {
 
   Future<void> clearSession() => AuthService.clearSession();
 
-  Future<HomeBundle> getHomeBundle(String token) async {
+  Future<void> logout(String token) async {
+    await AuthService.logout(token);
+  }
+
+  Future<HomeBundle> getHomeBundle(String token, {bool forceRefresh = false}) async {
     final results = await Future.wait<dynamic>([
-      MatchService.getMatches(token),
-      VenueService.getVenues(),
-      LeagueService.getLeagues(token),
-      TeamService.getMyTeams(token),
-      MatchService.getRecommendations(token),
+      MatchService.getMatches(token, forceRefresh: forceRefresh),
+      VenueService.getVenues(forceRefresh: forceRefresh),
+      LeagueService.getLeagues(token, forceRefresh: forceRefresh),
+      TeamService.getMyTeams(token, forceRefresh: forceRefresh),
+      MatchService.getRecommendations(token, forceRefresh: forceRefresh),
     ]);
 
     return HomeBundle(
@@ -73,6 +78,8 @@ class AppRepository {
     required double price,
     String description = '',
     String skillLevel = 'any',
+    int? venueId,
+    int? minPlayers,
   }) {
     return MatchService.createMatch(
       token: token,
@@ -84,11 +91,13 @@ class AppRepository {
       maxPlayers: maxPlayers,
       price: price,
       skillLevel: skillLevel,
+      venueId: venueId,
+      minPlayers: minPlayers,
     );
   }
 
-  Future<List<dynamic>> getRecommendations(String token) =>
-      MatchService.getRecommendations(token);
+  Future<List<dynamic>> getRecommendations(String token, {bool forceRefresh = false}) =>
+      MatchService.getRecommendations(token, forceRefresh: forceRefresh);
 
   Future<Map<String, dynamic>> submitReport({
     required String token,
@@ -120,7 +129,8 @@ class AppRepository {
     return MatchService.joinMatch(token: token, matchId: matchId);
   }
 
-  Future<List<Venue>> getFields({String? sport}) => VenueService.getVenues(sport: sport);
+  Future<List<Venue>> getFields({String? sport, bool forceRefresh = false}) =>
+      VenueService.getVenues(sport: sport, forceRefresh: forceRefresh);
 
   Future<Map<String, dynamic>> createField({
     required String token,
@@ -163,6 +173,15 @@ class AppRepository {
     return VenueService.bookVenue(venueId: venueId, date: date, startTime: start, endTime: end);
   }
 
+  Future<Map<String, dynamic>> payVenueBooking(int bookingId) =>
+      VenueService.payBooking(bookingId: bookingId);
+
+  Future<Map<String, dynamic>> cancelVenueBooking(int bookingId) =>
+      VenueService.updateBookingStatus(bookingId: bookingId, status: 'cancelled');
+
+  Future<List<Map<String, dynamic>>> getVenueSlots(int venueId, String date) =>
+      VenueService.getSlots(venueId, date);
+
   Future<Map<String, dynamic>> updateProfile({
     required String token,
     String? name,
@@ -196,7 +215,8 @@ class AppRepository {
 
   Future<List<VenueBooking>> getBookings() => VenueService.getVenueBookings(asOwner: false);
 
-  Future<List<dynamic>> getMyTeams(String token) => TeamService.getMyTeams(token);
+  Future<List<dynamic>> getMyTeams(String token, {bool forceRefresh = false}) =>
+      TeamService.getMyTeams(token, forceRefresh: forceRefresh);
 
   Future<Map<String, dynamic>> createTeam({
     required String token,
@@ -223,7 +243,8 @@ class AppRepository {
     return TeamService.getJoinRequests(token: token, teamId: teamId);
   }
 
-  Future<List<Map<String, dynamic>>> getLeagues(String token) => LeagueService.getLeagues(token);
+  Future<List<Map<String, dynamic>>> getLeagues(String token, {bool forceRefresh = false}) =>
+      LeagueService.getLeagues(token, forceRefresh: forceRefresh);
 
   Future<Map<String, dynamic>> getLeagueDetails(String token, int leagueId) {
     return LeagueService.getLeagueDetails(token, leagueId);
@@ -257,12 +278,54 @@ class AppRepository {
     return LeagueService.joinLeague(token: token, leagueId: leagueId, teamId: teamId);
   }
 
+  Future<Map<String, dynamic>> startLeague(String token, int leagueId) =>
+      LeagueService.startLeague(token, leagueId);
+
+  Future<Map<String, dynamic>> cancelLeague(String token, int leagueId) =>
+      LeagueService.cancelLeague(token, leagueId);
+
+  Future<Map<String, dynamic>> removeLeagueTeam({
+    required String token,
+    required int leagueId,
+    required int teamId,
+  }) =>
+      LeagueService.removeTeam(token: token, leagueId: leagueId, teamId: teamId);
+
+  Future<Map<String, dynamic>> recordFixtureResult({
+    required String token,
+    required int fixtureId,
+    required int homeScore,
+    required int awayScore,
+    String walkover = '',
+  }) =>
+      LeagueService.recordFixtureResult(
+          token: token, fixtureId: fixtureId, homeScore: homeScore,
+          awayScore: awayScore, walkover: walkover);
+
+  Future<Map<String, dynamic>> rescheduleFixture({
+    required String token,
+    required int fixtureId,
+    required DateTime kickoff,
+  }) =>
+      LeagueService.rescheduleFixture(token: token, fixtureId: fixtureId, kickoff: kickoff);
+
+  Future<Map<String, dynamic>> scheduleFixture({
+    required String token,
+    required int fixtureId,
+    DateTime? dateTime,
+    int? venueId,
+    String? location,
+  }) =>
+      LeagueService.scheduleFixture(
+          token: token, fixtureId: fixtureId, dateTime: dateTime,
+          venueId: venueId, location: location);
+
   Future<List<Tournament>> getTournaments() => TournamentService.getTournaments();
 
   Future<Map<String, dynamic>> getTournamentDetails(int id) => TournamentService.getTournamentDetails(id);
 
-  Future<Map<String, dynamic>> getProfileStats(String token, int userId) {
-    return UserStatsService.getUserStats(token, userId);
+  Future<Map<String, dynamic>> getProfileStats(String token, int userId, {bool forceRefresh = false}) {
+    return UserStatsService.getUserStats(token, userId, forceRefresh: forceRefresh);
   }
 
   Future<List<String>> getUserForm(String token, int userId) {
@@ -271,6 +334,9 @@ class AppRepository {
 
   Future<Map<String, dynamic>> getPhoneStatus(String token) =>
       PhoneVerifyService.status(token);
+
+  Future<Map<String, dynamic>> getEngagementStatus(String token) =>
+      EngagementService.status(token);
 
   Future<Map<String, dynamic>> getNotifications(String token) {
     return NotificationService.getNotifications(token);

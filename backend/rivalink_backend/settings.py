@@ -146,7 +146,6 @@ REST_FRAMEWORK = {
         'rest_framework.parsers.FormParser',
         'rest_framework.parsers.MultiPartParser',
     ],
-    'EXCEPTION_HANDLER': 'rest_framework.views.exception_handler',
     'COERCE_DECIMAL_TO_STRING': True,
     'UNAUTHENTICATED_USER': 'django.contrib.auth.models.AnonymousUser',
 }

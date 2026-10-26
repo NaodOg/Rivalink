@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../api_config.dart';
+import 'cache_service.dart';
 import 'upload_media_type.dart';
 
 class AuthService {
@@ -183,6 +184,7 @@ class AuthService {
 
       if (response.statusCode == 200) {
         // Update successful
+        CacheService.invalidateUserStats();
         return {
           'success': true,
           'message': data['message'],
@@ -233,6 +235,7 @@ class AuthService {
       final response = await http.Response.fromStream(streamed);
       final data = json.decode(response.body);
       if (response.statusCode == 200) {
+        CacheService.invalidateUserStats();
         return {'success': true, 'url': data['url']};
       }
       return {'success': false, 'message': data['error'] ?? 'Upload failed'};

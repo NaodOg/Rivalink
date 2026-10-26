@@ -9,7 +9,7 @@ from .entitlements import (
     can_create_team, can_join_team,
 )
 from .serializers import (
-    err_msg as _err_msg,
+    err_msg as _err_msg, display_name,
 )
 from .validators import (
     SPORT_CHOICES, validate_string, validate_optional_string, validate_int, validate_enum, sanitize_text,
@@ -416,6 +416,9 @@ def create_team(request):
                 'is_seeking_players': team.is_seeking_players,
                 'spots_left': team.spots_left,
                 'owner_id': team.owner.id,
+                'owner_name': display_name(team.owner),
+                'created_at': team.created_at.isoformat(),
+                'updated_at': team.updated_at.isoformat(),
             }
         }, status=status.HTTP_201_CREATED)
 
@@ -445,11 +448,16 @@ def get_my_teams(request):
                 'id': team.id,
                 'name': team.name,
                 'sport': team.sport,
+                'description': team.description,
                 'type': f"{team.sport.title()} {team.max_members}v{team.max_members}",
                 'location': team.location,
                 'max_members': team.max_members,
                 'current_members': membership.member_count,
+                'spots_left': max(0, team.max_members - membership.member_count),
                 'owner_id': team.owner.id,
+                'owner_name': display_name(team.owner),
+                'created_at': team.created_at.isoformat(),
+                'updated_at': team.updated_at.isoformat(),
                 'is_active': team.is_active,
                 'status': 'Active' if team.is_active else 'Inactive',
                 'is_owner': team.owner.id == request.user.id,
@@ -487,12 +495,16 @@ def get_teams_seeking_players(request):
                 'id': team.id,
                 'name': team.name,
                 'sport': team.sport,
+                'description': team.description,
                 'type': f"{team.sport.title()} {team.max_members}v{team.max_members}",
                 'location': team.location,
                 'max_members': team.max_members,
                 'current_members': team.member_count,
-                'spots_left': team.spots_left,
+                'spots_left': max(0, team.max_members - team.member_count),
                 'owner_id': team.owner.id,
+                'owner_name': display_name(team.owner),
+                'created_at': team.created_at.isoformat(),
+                'updated_at': team.updated_at.isoformat(),
             })
 
         return Response({
@@ -608,7 +620,11 @@ def get_team_chat(request, team_id):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        messages = ChatMessage.objects.filter(team=team).select_related('user')[:100]
+        messages = list(
+            ChatMessage.objects.filter(team=team).select_related('user')
+            .order_by('-created_at', '-id')[:100]
+        )
+        messages.reverse()
 
         data = []
         for m in messages:

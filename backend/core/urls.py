@@ -7,6 +7,8 @@ from .views_matches import (
     leave_match, cancel_match, get_match_history, search_matches,
     get_match_chat, send_match_chat, edit_match,
     match_ratings, match_result, get_match_recommendations,
+    confirm_match_result, mark_match_payments, pay_match_share,
+    request_venue_booking, confirm_venue_booking,
 )
 from .views_teams import (
     create_team, get_my_teams, get_teams_seeking_players, join_team, leave_team,
@@ -16,11 +18,13 @@ from .views_teams import (
 )
 from .views_leagues import (
     get_leagues, get_my_leagues, create_league, edit_league, delete_league,
-    join_league, get_league_details,
+    join_league, get_league_details, start_league, cancel_league, remove_league_team,
+    record_fixture_result, reschedule_fixture, schedule_fixture,
 )
 from .views_venues import (
     create_venue, list_venues, get_venue, get_my_venues, update_venue, delete_venue,
     book_venue, get_venue_bookings, update_venue_booking, rate_venue,
+    venue_schedule, venue_revenue, venue_availability,
 )
 from .views_referees import (
     create_referee_profile, get_referee_profile, list_referees,
@@ -40,9 +44,12 @@ from .views_social import (
     list_referrals, send_phone_code, verify_phone, phone_status,
 )
 from .payment_views import (
-    initialize_premium_payment, payment_webhook, payment_status, get_my_payments
+    initialize_premium_payment, initialize_venue_booking_payment, payment_webhook,
+    payment_status, get_my_payments
 )
 from .revenue_views import revenue_summary, my_transactions
+from .analytics_views import ingest_analytics, analytics_report
+from .engagement_views import engagement
 from .auth_views import (
     change_password, logout_all, password_reset_request, password_reset_confirm,
 )
@@ -92,8 +99,19 @@ urlpatterns = [
     path('leagues/<int:league_id>/delete/', delete_league, name='delete_league'),
     path('leagues/join/', join_league, name='join_league'),
     path('leagues/<int:league_id>/', get_league_details, name='get_league_details'),
+    path('leagues/<int:league_id>/start/', start_league, name='start_league'),
+    path('leagues/<int:league_id>/cancel/', cancel_league, name='cancel_league'),
+    path('leagues/<int:league_id>/remove-team/', remove_league_team, name='remove_league_team'),
+    path('leagues/fixtures/<int:fixture_id>/result/', record_fixture_result, name='record_fixture_result'),
+    path('leagues/fixtures/<int:fixture_id>/reschedule/', reschedule_fixture, name='reschedule_fixture'),
+    path('leagues/fixtures/<int:fixture_id>/schedule/', schedule_fixture, name='schedule_fixture'),
     path('matches/<int:match_id>/ratings/', match_ratings, name='match_ratings'),
     path('matches/<int:match_id>/result/', match_result, name='match_result'),
+    path('matches/<int:match_id>/result/confirm/', confirm_match_result, name='confirm_match_result'),
+    path('matches/<int:match_id>/payments/', mark_match_payments, name='mark_match_payments'),
+    path('matches/<int:match_id>/pay/', pay_match_share, name='pay_match_share'),
+    path('matches/<int:match_id>/booking-request/', request_venue_booking, name='request_venue_booking'),
+    path('matches/<int:match_id>/booking-confirm/', confirm_venue_booking, name='confirm_venue_booking'),
     path('users/<int:user_id>/ratings/', user_ratings, name='user_ratings'),
     path('users/<int:user_id>/stats/', get_user_stats, name='get_user_stats'),
     path('favorites/<str:favorite_type>/<int:object_id>/', manage_favorites, name='manage_favorites'),
@@ -120,6 +138,9 @@ urlpatterns = [
     path('venues/book/', book_venue, name='book_venue'),
     path('venues/bookings/', get_venue_bookings, name='get_venue_bookings'),
     path('venues/bookings/<int:booking_id>/', update_venue_booking, name='update_venue_booking'),
+    path('venues/revenue/', venue_revenue, name='venue_revenue'),
+    path('venues/<int:venue_id>/schedule/', venue_schedule, name='venue_schedule'),
+    path('venues/<int:venue_id>/availability/', venue_availability, name='venue_availability'),
     # Tournament endpoints
     path('tournaments/', list_tournaments, name='list_tournaments'),
     path('tournaments/my/', get_my_tournaments, name='get_my_tournaments'),
@@ -155,11 +176,17 @@ urlpatterns = [
     path('auth/phone/status/', phone_status, name='phone_status'),
     # Payment endpoints
     path('payments/initialize/', initialize_premium_payment, name='initialize_premium_payment'),
+    path('payments/venue/initialize/', initialize_venue_booking_payment,
+         name='initialize_venue_booking_payment'),
     path('payments/webhook/', payment_webhook, name='payment_webhook'),
     path('payments/status/', payment_status, name='payment_status'),
     path('payments/history/', get_my_payments, name='get_my_payments'),
     # Revenue / monetization
     path('revenue/summary/', revenue_summary, name='revenue_summary'),
     path('revenue/me/', my_transactions, name='my_transactions'),
+    # Product analytics
+    path('analytics/events/', ingest_analytics, name='ingest_analytics'),
+    path('analytics/report/', analytics_report, name='analytics_report'),
+    path('engagement/status/', engagement, name='engagement_status'),
 ]
 

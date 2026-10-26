@@ -8,10 +8,12 @@ String _formatTime(DateTime dt) {
 
 String prettyDate(DateTime dt) {
   final now = DateTime.now();
-  final diff = dt.difference(now);
-  if (diff.inDays == 0) return 'Today, ${_formatTime(dt)}';
-  if (diff.inDays == 1) return 'Tomorrow, ${_formatTime(dt)}';
-  if (diff.inDays < 7) {
+  final today = DateTime(now.year, now.month, now.day);
+  final day = DateTime(dt.year, dt.month, dt.day);
+  final dayDiff = day.difference(today).inDays;
+  if (dayDiff <= 0) return 'Today, ${_formatTime(dt)}';
+  if (dayDiff == 1) return 'Tomorrow, ${_formatTime(dt)}';
+  if (dayDiff < 7) {
     const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     return '${days[dt.weekday - 1]}, ${_formatTime(dt)}';
   }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/data/services/payment_service.dart';
+import '../../core/data/services/analytics_service.dart';
 import '../../core/theme/rivalink_theme.dart';
 import '../widgets/pf_button.dart';
 import '../widgets/pf_card.dart';
@@ -34,6 +35,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
   @override
   void initState() {
     super.initState();
+    AnalyticsService.event('premium_viewed', {'source': 'subscription_screen'});
     _loadStatus();
   }
 

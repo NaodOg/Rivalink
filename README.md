@@ -21,7 +21,8 @@ Rivalink is a full-stack sports matchmaking platform built with **Flutter** (mob
    - Join/Leave matches
    - Match details with participant list
    - Search and filter matches
-   - Match recommendations ("Recommended For You" by favorite sports)
+   - Match recommendations ("Recommended For You") ranked by sport, location,
+     urgency, reliability, collaborative filtering and (once trained) propensity
    - Match history
 
 3. **Team Management**
@@ -40,15 +41,15 @@ Rivalink is a full-stack sports matchmaking platform built with **Flutter** (mob
    - Full league details view with header, info card, and standings table
 
 5. **Ranking System**
-   - **Individual Elo ratings** per sport (initial 1200, K=32/48 based on experience)
+   - **Individual Glicko-2 ratings** per sport (initial 1200, RD 350, volatility 0.06)
    - **Team ranking** with points-based league standings
    - Rankings screen with tab toggle (Individual / Teams) and sport filter
-   - User profile shows per-sport Elo with W/L/D
+   - User profile shows per-sport rating with W/L/D
 
 6. **Match Results & Scorekeeping**
    - Record match outcomes (pickup, 1v1, team vs team)
    - MVP selection for pickup matches
-   - **Team group assignments** (A/B) for team sports with individual Elo
+   - **Team group assignments** (A/B) for team sports with individual Glicko-2
    - Score entry (e.g. "3-2")
    - Auto-computes rankings after result submission
 
@@ -646,10 +647,13 @@ adb install -r build/app/outputs/flutter-apk/app-debug.apk
 | `TeamMember` | User membership in a team |
 | `League` | Competition with format, max teams, prize |
 | `LeagueMember` | Team in a league, with standings stats |
-| `UserSportRating` | Per-user per-sport Elo rating |
+| `UserSportRating` | Per-user per-sport Glicko-2 rating (rating, RD, volatility) |
 | `TeamRanking` | Per-team per-sport league ranking |
 | `ChatMessage` | Message for a match or team chat |
 | `Notification` | In-app notifications |
+| `RecommendationExposure` | A ranked match that was shown to a user |
+| `ModelArtifact` | Trained model weights + readiness metadata |
+| `NotificationBandit` | Thompson-sampling posterior per notification arm |
 
 ---
 
@@ -658,3 +662,251 @@ adb install -r build/app/outputs/flutter-apk/app-debug.apk
 - **Name**: Naod Masresha
 - **Email**: naodog00@gmail.com
 - **Phone**: +251947892090
+
+---
+
+## Growth & Retention Algorithms
+
+> **Status: built.** The rules layer, exposure logging, experiments, reliability,
+> collaborative filtering, Glicko-2, notification bandits and the post-match loop
+> are live. The learned join/churn/fill models are implemented and activate
+> automatically once their data thresholds are met; until then every caller uses
+> the rules fallback. `python manage.py train_models` reports current readiness.
+
+### Context: what already exists
+
+The product combines a rules-based retention engine with a full analytics
+pipeline. The algorithms below are an upgrade path, not a greenfield build.
+
+**Base layer (live)**
+- Personalized match ranking: sport affinity, city/location, urgency, scarcity,
+  premium organizer, collaborative filtering, organizer reliability.
+- Next-best-action per user: match soon, fill match, premium expiry, streak risk,
+  win-back, discover, host fallback.
+- Weekly activity streaks and a rules-based at-risk score.
+- Automated nudges (`run_engagement_jobs`): fixture reminders, fill assistant,
+  win-back, premium expiry, streak nudges, post-match rematch, weekly recap
+  (all deduplicated, frequency-capped, and send-time aware).
+- Analytics: event ingestion, funnels, retention cohorts, screen time, feature
+  adoption, business metrics, and the staff dashboard at `/insights/`.
+- Elo ratings, team standings, and match results as the foundation for Glicko-2.
+
+**New in this layer (built)**
+- Recommendation exposure logging and deterministic A/B experiments.
+- Reliability scoring, co-participation collaborative filtering, ranking v2 with
+  human-readable reasons and online exploration.
+- Join-propensity, churn, and fill-probability models (pure-Python logistic
+  regression; weights in the database; rules fallback).
+- Notification bandits (Thompson sampling), send-time windows, quiet hours, and
+  frequency caps.
+- Glicko-2 ratings with rating deviation + volatility.
+- Post-match rematch loop and weekly recap.
+
+---
+
+### What TikTok, Instagram and Tinder actually use
+
+| Mechanic | TikTok | Instagram | Tinder | Rivalink translation |
+|---|---|---|---|---|
+| Two-stage recommender | Candidate generation, then rank by predicted watch time / completion / share | Candidate generation, then rank by predicted like/comment/save/time | Rank people by desirability, activity, recency, distance | Rank **matches/opponents**, never people's worth |
+| Fast feedback loop | Every view/rewatch/scroll is a label | Every engagement trains the feed | Swipe is a perfect label | `viewed -> join tap -> joined -> completed -> rated -> returned` |
+| Variable reward | "Next video might be great" | Likes and social validation | Match + scarcity/near-miss | Close matches, Elo movement, rank tiers, streaks, rivalries |
+| Habit scaffolding | Notifications, infinite scroll | Notifications, Stories, streaks | Activity nudges, boosts | Real games with real people expecting you, timed reminders |
+
+The goal for a sports utility is **not** time-in-app. It is **completed matches
+per week** and repeat participation. Optimize the outcome, not the scroll.
+
+---
+
+### Phase A — Instrumentation and rules (live)
+
+**A1. Exposure logging + experiments**
+- Model `RecommendationExposure`: user, match, surface, variant, score, features
+  (JSON at serve time), created_at.
+- Every recommended match served logs an exposure, so models learn from what was
+  shown, not just what was joined.
+- Deterministic A/B assignment: `sha256(experiment + user_id)` mapped to variants
+  (`A` control, `B` treatment) — no database needed for assignment.
+- Experiments: ranking weights and notification copy.
+
+**A2. Reliability score** (`core/reliability.py`)
+- Inputs: no-shows, host cancellations, received ratings.
+- Formula: `100 - 15*no_shows - 10*host_cancellations + 10*(avg_rating-3)`,
+  clamped to 0–100. Default 100 for new users.
+- Used in ranking, fill notifications, and exposed in `/api/engagement/status/`.
+
+**A3. Ranking v2** (`core/engagement.py`)
+- Base score: `0.40* sport fit + 0.20* location + 0.15* urgency + 0.10* scarcity
+  + 0.10* CF + 0.05* organizer quality`, normalized to 0–100.
+- Every recommendation carries human-readable **reasons**: "Your sport",
+  "Near you", "Starts soon", "Only 3 spots left", "Reliable organizer",
+  "Players like you joined".
+- **Exploration:** 10–18% of slots go to new/uncertain matches (appended below
+  top picks) so the feed does not collapse into one sport/location.
+- Join-propensity probability is blended in when its model is ready.
+- The app renders the top reason on recommendation cards.
+
+**A4. Collaborative filtering** (`core/collaborative.py`)
+- Co-participation: users who joined match A also joined match B.
+- Item-item scores computed on the fly; cold start returns nothing until a user
+  has at least 3 participations.
+
+**A5. Post-match rematch loop**
+- 24–48h after a confirmed result, participants get one deduplicated nudge with
+  the next recommended match (or a rematch prompt).
+- Goal: turn one match into the next without the user browsing.
+
+**A6. Weekly recap + frequency caps**
+- Monday recap: matches played last week, streak, upcoming fixture, next match.
+- Hard caps: max 2 notifications/day and 6/week per user; transactional
+  messages (match today, fixture reminder) can bypass the cap.
+- Quiet hours 22:00–07:00 and per-user activity windows gate generic nudges.
+
+---
+
+### Phase B — Learned models (live code, activate at data thresholds)
+
+**B1. Join-propensity model**
+- **Label:** did the user join the exposed match within 24h?
+- **Features:** sport affinity, distance/city, price, hours to start, spots left,
+  day/time, skill level, organizer reliability, user's historical join rate for
+  the sport, CF score, premium organizer, prior exposure count.
+- **Training:** pure-Python logistic regression (no external ML dependency),
+  batch gradient descent with L2; features standardized and stored with weights
+  in `ModelArtifact`.
+- **Inference:** blend 60% rules + 40% model probability; fall back to rules if
+  no artifact is ready.
+- **Unlock threshold:** ≥200 exposures older than 24h and ≥30 positive joins.
+- **Implemented in:** `core/ml.py`; `GET /api/matches/recommendations/` returns
+  `reason`, `reasons`, `recommendation_variant`, and `join_probability` once
+  available.
+
+**B2. Churn model**
+- **Dataset:** rolling 6-week window. Features from days 1–28: days since last
+  event, sessions in 7/28 days, matches joined/hosted in 28 days, streak,
+  no-shows, premium status, reliability. Label: any activity in days 29–42.
+- **Use:** blends with the rules at-risk score; win-back only targets users whose
+  blended risk is meaningful.
+- **Unlock threshold:** ≥300 labeled users; retrain weekly, rules stay as
+  fallback.
+
+**B3. Fill-probability model**
+- **Dataset:** closed matches older than 1 hour.
+- **Features:** sport, capacity, price, lead time (created→kickoff), day/time,
+  city-independent organizer reliability. Live fill progress is blended at
+  inference, so training does not leak final fill counts.
+- **Use:** fill assistant prioritizes matches least likely to fill; the host
+  next-best-action and match ranking can surface the estimate.
+- **Unlock threshold:** ≥50 closed matches.
+
+**B4. Notification bandits**
+- Arms: send-time windows (morning/afternoon/evening) and copy variants (A/B).
+- Thompson sampling with Beta(alpha, beta) per user/arm in `NotificationBandit`.
+- Reward: user active within 24h after a notification (from analytics events).
+- A `notification_sent` analytics event records the arm for later reward updates.
+- Frequency caps and quiet hours override the bandit.
+
+**B5. Glicko-2 ratings**
+- Replaces K-factor Elo and tracks rating uncertainty.
+- `UserSportRating` now stores `rating_deviation` (default 350) and `volatility`
+  (default 0.06); one match is one rating period.
+- Team games update each player against the opposing group's players with
+  win/loss/draw scores (one period, multiple opponents).
+- Rating deviation is available for future matchmaking and is updated on every
+  confirmed result.
+
+---
+
+### Phase C — Scale (after retention and revenue are proven)
+
+- Two-tower retrieval/embeddings for match and player recommendations.
+- Session-sequence model for "what does this user want right now".
+- Sponsor-audience matching from analytics segments.
+- LTV/CAC cohort modeling and pricing experiments (A/B, not manual guesses).
+- Dynamic featured listings, with clear labeling and no pay-to-win ranking.
+
+---
+
+### Modules, endpoints and commands
+
+| Item | Purpose |
+|---|---|
+| `core/reliability.py` | Reliability scoring |
+| `core/experiments.py` | Deterministic A/B assignment |
+| `core/collaborative.py` | Co-participation item-item scores |
+| `core/ml.py` | Logistic regression, feature builders, artifacts |
+| `core/glicko2.py` | Glicko-2 rating updates |
+| `core/bandit.py` | Thompson sampling, send windows, frequency caps |
+| `RecommendationExposure` model | Serve-time impression logging |
+| `ModelArtifact` model | Trained weights, metadata, sample counts |
+| `NotificationBandit` model | Per-user/arm Beta parameters |
+| `GET /api/engagement/status/` | Includes reliability, model status, experiments |
+| `GET /api/matches/recommendations/` | Includes reasons, variant, join probability |
+| `python manage.py train_models` | Train join/churn/fill models when thresholds are met |
+| `python manage.py update_bandits` | Reward notification bandits from 24h activity |
+| `python manage.py run_engagement_jobs` | Rematch + weekly recap + fill probability + caps |
+
+Run the model/bandit jobs weekly (they are safe to run daily; they only report
+"waiting" below threshold):
+
+```bash
+cd backend
+./venv/Scripts/python manage.py train_models
+./venv/Scripts/python manage.py update_bandits
+```
+
+`train_models` prints samples/positives versus each threshold. The app never
+requires an artifact to work — the rules layer is the permanent fallback.
+
+
+---
+
+### Metrics that decide whether this works
+
+**North star:** completed matches per week.
+
+**Diagnostics:** request→completion rate, D7/D30 retention, match fill rate,
+no-show rate, time-to-match, sessions per week, premium conversion, net revenue,
+refund rate, contribution margin.
+
+**Guardrails:** notification unsubscribes, notification-to-open rate, users
+blocking the app, cancellations after notifications, complaints.
+
+If time-in-app rises while completed matches fall, the algorithms are optimizing
+the wrong thing.
+
+---
+
+### Data timeline
+
+| Week | What happens |
+|---|---|
+| 0–2 | Exposure logging, experiments, reliability, ranking v2, CF, rematch loop — **done** |
+| 2–6 | Collect labels (exposures → joins, results, notifications → activity) |
+| ~6 | `train_models` reports readiness; join/churn/fill models activate |
+| 6+ | Weekly retraining, bandit optimization, Glicko-2 in matchmaking |
+| 12+ | Scale-phase ideas only if retention and revenue hold |
+
+`train_models` prints readiness (samples / positives / threshold) and skips
+training below thresholds. Every model has a rules-based fallback.
+
+---
+
+### Ethical guardrails (non-negotiable)
+
+- **Rank matches and opportunities, not people's worth.** No desirability scores
+  on users.
+- **No gambling-style mechanics.** No paid prize pools framed as betting, no
+  loot-box behavior.
+- **No fake urgency or fake scarcity.** Every "3 spots left" must be real.
+- **No pay-to-be-seen beyond clearly labeled featured listings.** Reliability and
+  relevance determine ranking.
+- **Notification discipline.** Hard frequency caps, quiet hours, and no promos
+  when a user already has a match.
+- **Transparency.** Users can see why a match was recommended and can opt out of
+  analytics/personalization in Settings.
+- **Privacy.** Models use aggregated/behavioral data, never message contents or
+  personal contact details. No PII in events.
+- **Streak grace.** One missed week should not wipe months of progress; allow a
+  grace period or a streak freeze earned through participation.
+

@@ -13,6 +13,9 @@ class RivalinkMatch {
   final String organizerName;
   final bool isOrganizer;
   final String skillLevel;
+  final List<String> participantsPreview;
+  final String? outcome;
+  final String? reason;
 
   RivalinkMatch({
     required this.id,
@@ -29,6 +32,9 @@ class RivalinkMatch {
     this.organizerName = '',
     this.isOrganizer = false,
     this.skillLevel = 'any',
+    this.participantsPreview = const [],
+    this.outcome,
+    this.reason,
   });
 
   factory RivalinkMatch.fromJson(Map<String, dynamic> json) {
@@ -47,6 +53,10 @@ class RivalinkMatch {
       organizerName: json['organizer_name'] ?? '',
       isOrganizer: json['is_organizer'] ?? false,
       skillLevel: json['skill_level'] ?? 'any',
+      participantsPreview:
+          List<String>.from(json['participants_preview'] ?? const []),
+      outcome: json['outcome']?.toString(),
+      reason: json['reason']?.toString(),
     );
   }
 
@@ -69,13 +79,15 @@ class RivalinkMatch {
   
   String get formattedDate {
     final now = DateTime.now();
-    final diff = dateTime.difference(now);
-    
-    if (diff.inDays == 0) {
+    final today = DateTime(now.year, now.month, now.day);
+    final day = DateTime(dateTime.year, dateTime.month, dateTime.day);
+    final dayDiff = day.difference(today).inDays;
+
+    if (dayDiff <= 0) {
       return 'Today, ${_formatTime(dateTime)}';
-    } else if (diff.inDays == 1) {
+    } else if (dayDiff == 1) {
       return 'Tomorrow, ${_formatTime(dateTime)}';
-    } else if (diff.inDays < 7) {
+    } else if (dayDiff < 7) {
       return '${_dayName(dateTime.weekday)}, ${_formatTime(dateTime)}';
     } else {
       return '${dateTime.day}/${dateTime.month}, ${_formatTime(dateTime)}';

@@ -18,7 +18,8 @@ def can_host_match(user):
     if is_premium(user):
         return True
     month_start = timezone.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    count = Match.objects.filter(organizer=user, created_at__gte=month_start).count()
+    count = Match.objects.filter(
+        organizer=user, created_at__gte=month_start, is_active=True).count()
     return count < MAX_FREE_MONTHLY_HOSTS
 
 
@@ -36,11 +37,15 @@ def can_join_team(user):
 
 def team_all_premium(team):
     """Strict league rule: every team member (incl. owner) must be premium."""
-    members = TeamMember.objects.filter(team=team).select_related('user')
-    if team.owner_id and not TeamMember.objects.filter(team=team, user=team.owner).exists():
+    members = list(TeamMember.objects.filter(team=team).select_related('user'))
+    users = [m.user for m in members]
+    member_ids = {m.user_id for m in members}
+    if team.owner_id and team.owner_id not in member_ids:
+        users.append(team.owner)
+    if not users:
         return is_premium(team.owner)
-    for member in members:
-        if not UserProfile.get_or_create_for_user(member.user).premium_active:
+    for user in users:
+        if not UserProfile.get_or_create_for_user(user).premium_active:
             return False
     return True
 

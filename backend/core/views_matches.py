@@ -1,22 +1,34 @@
-from rest_framework.decorators import api_view, permission_classes
+import uuid
+
+import requests as http_requests
+from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.db.models import Q
 from django.utils import timezone
 from django.db import transaction
-from datetime import datetime
+from datetime import datetime, timedelta
 from .models import (
-    UserProfile, Team, Match, MatchParticipant, MatchWaitlist, Notification,
-    ChatMessage, PlayerRating, MatchResult, Favorite,
+    UserProfile, Team, TeamMember, Match, MatchParticipant, MatchWaitlist, Notification,
+    ChatMessage, PlayerRating, MatchResult, MatchResultConfirmation, Payment,
+    Venue, VenueBooking, Favorite,
 )
 from .push import notify
 from .entitlements import (
     can_host_match,
 )
 from .monetization import (
-    host_fee_for, record_transaction,
+    host_fee_for, record_transaction, money, venue_commission,
+    BOOKING_SLOT_HOURS, CANCEL_FULL_REFUND_HOURS,
+    HOST_CANCEL_STRIKE_LIMIT, HOST_SUSPENSION_DAYS,
+)
+from .escrow import (
+    hold, release_match_funds, refund_percent_for,
+    refund_participant, forfeit_no_shows, escrow_summary,
+    all_players_confirmed, cancel_and_settle, venue_cancellation_fee,
 )
 from .serializers import (
     err_msg as _err_msg, display_name, match_summary, match_my, match_history,
@@ -24,11 +36,13 @@ from .serializers import (
 from .validators import (
     SPORT_CHOICES, MATCH_TYPES, RESULT_TYPES, SKILL_LEVELS, validate_string, validate_optional_string,
     validate_int, validate_optional_int, validate_decimal, validate_enum, sanitize_text, validate_date_iso,
+    validate_score, SensitiveWriteThrottle,
 )
 
 
+from .analytics import track
 from .view_shared import (
-    _compute_rankings,
+    _apply_result_rankings,
 )
 
 
@@ -113,7 +127,11 @@ def get_match_chat(request, match_id):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        messages = ChatMessage.objects.filter(match=match).select_related('user')[:100]
+        messages = list(
+            ChatMessage.objects.filter(match=match).select_related('user')
+            .order_by('-created_at', '-id')[:100]
+        )
+        messages.reverse()
 
         data = []
         for m in messages:
@@ -230,6 +248,13 @@ def leave_match(request):
             if not participant:
                 return Response({'error': 'You are not in this match'}, status=status.HTTP_400_BAD_REQUEST)
 
+            # Refund the share per the cancellation window before removing them.
+            refund_pct = refund_percent_for(match)
+            refunded_amount = money(0)
+            if participant.payment_status == 'held':
+                refunded_amount = refund_participant(
+                    participant, percent=refund_pct, reason='Player left the match')
+
             participant.delete()
             match.current_players = max(0, match.current_players - 1)
             match.save()
@@ -263,7 +288,9 @@ def leave_match(request):
             related_match=match,
         )
 
-        return Response({'message': 'You have left the match'}, status=status.HTTP_200_OK)
+        return Response({'message': 'You have left the match',
+                         'refund_percent': refund_pct,
+                         'refunded': str(refunded_amount)}, status=status.HTTP_200_OK)
 
     except Match.DoesNotExist:
         return Response({'error': 'Match not found'}, status=status.HTTP_404_NOT_FOUND)
@@ -289,21 +316,60 @@ def cancel_match(request):
         if match.organizer.id != request.user.id:
             return Response({'error': 'Only the organizer can cancel this match'}, status=status.HTTP_403_FORBIDDEN)
 
-        # Notify every participant except organizer
-        participants = MatchParticipant.objects.filter(match=match).exclude(user=request.user).select_related('user')
-        for p in participants:
+        # A played match can't be cancelled.
+        result = MatchResult.objects.filter(match=match).first()
+        if result and result.status == 'confirmed':
+            return Response({'error': 'This match has been played and confirmed — it cannot be cancelled'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        if not match.is_active:
+            return Response({'error': 'Match is already cancelled'}, status=status.HTTP_400_BAD_REQUEST)
+
+        hours_to_kickoff = (match.date_time - timezone.now()).total_seconds() / 3600
+        late = hours_to_kickoff < CANCEL_FULL_REFUND_HOURS
+
+        # Cancel the venue booking (if any) and work out the venue's fee.
+        venue_fee = money(0)
+        booking = VenueBooking.objects.filter(match=match).first()
+        if booking and booking.status != 'cancelled':
+            venue_fee = venue_cancellation_fee(booking)
+            booking.status = 'cancelled'
+            booking.save(update_fields=['status'])
+
+        settlement = cancel_and_settle(match, reason='Cancelled by the organizer', venue_fee=venue_fee)
+
+        match.is_active = False
+        match.booking_status = 'cancelled'
+        match.cancelled_reason = 'Cancelled by organizer'
+        match.cancelled_at = timezone.now()
+        match.save(update_fields=['is_active', 'booking_status', 'cancelled_reason', 'cancelled_at'])
+
+        # Only the host is penalised.
+        profile = UserProfile.get_or_create_for_user(request.user)
+        if late:
+            profile.host_cancel_count += 1
+        if profile.host_cancel_count >= HOST_CANCEL_STRIKE_LIMIT:
+            profile.host_suspended_until = timezone.now() + timedelta(days=HOST_SUSPENSION_DAYS)
+        profile.save(update_fields=['host_cancel_count', 'host_suspended_until'])
+
+        for p in MatchParticipant.objects.filter(match=match).exclude(user=request.user).select_related('user'):
             notify(
                 p.user,
                 'match_cancelled',
-                'Match cancelled',
-                f'"{match.title}" has been cancelled by the organizer.',
+                'Match cancelled by the host',
+                f'"{match.title}" was cancelled by the organizer. '
+                f'Your share (Br {p.amount_paid}) has been refunded.',
                 match=match,
             )
 
-        match.is_active = False
-        match.save()
-
-        return Response({'message': 'Match cancelled successfully'}, status=status.HTTP_200_OK)
+        return Response({
+            'message': 'Match cancelled — players refunded',
+            'refunded': str(settlement['refunded']),
+            'venue_fee': str(venue_fee),
+            'host_penalty': str(settlement['penalty']),
+            'host_strikes': profile.host_cancel_count,
+            'suspended_until': profile.host_suspended_until.isoformat() if profile.host_suspended_until else None,
+        }, status=status.HTTP_200_OK)
 
     except Match.DoesNotExist:
         return Response({'error': 'Match not found'}, status=status.HTTP_404_NOT_FOUND)
@@ -403,7 +469,8 @@ def search_matches(request):
                 Q(title__icontains=q) | Q(location__icontains=q) | Q(description__icontains=q)
             )
 
-        qs = qs.order_by('-organizer__profile__is_premium', 'date_time')
+        qs = qs.prefetch_related('participants__user').order_by(
+            '-organizer__profile__is_premium', 'date_time')
         matches_data = [match_summary(match) for match in qs[:50]]
 
         return Response({'matches': matches_data}, status=status.HTTP_200_OK)
@@ -427,9 +494,11 @@ def create_match(request):
             location = validate_string(request.data.get('location'), 200, 'Location')
             date_time = validate_date_iso(request.data.get('date_time'), 'Date/time')
             max_players = validate_int(request.data.get('max_players', 10), 2, 100, 'Max players')
+            min_players = validate_int(request.data.get('min_players', 0), 0, 100, 'Min players')
             price = validate_decimal(request.data.get('price', 0), 0, 999999, 'Price')
             skill_level = validate_enum(request.data.get('skill_level', 'any'), SKILL_LEVELS, 'skill_level')
             team_id = request.data.get('team_id')
+            venue_id = request.data.get('venue_id')
         except ValueError as e:
             return Response({'error': _err_msg(e)}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -437,11 +506,30 @@ def create_match(request):
         if team_id:
             team = Team.objects.get(id=team_id)
 
+        venue = None
+        if venue_id:
+            try:
+                venue = Venue.objects.get(id=venue_id)
+            except Venue.DoesNotExist:
+                return Response({'error': 'Venue not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        profile = UserProfile.get_or_create_for_user(request.user)
+        if profile.host_suspended_until and profile.host_suspended_until > timezone.now():
+            return Response({
+                'error': 'You are suspended from hosting after repeated cancellations. '
+                         f'You can host again on {profile.host_suspended_until:%Y-%m-%d}.',
+                'suspended_until': profile.host_suspended_until.isoformat(),
+            }, status=status.HTTP_403_FORBIDDEN)
+
         if not can_host_match(request.user):
             return Response({
                 'error': 'Free accounts can host 2 matches per month. Upgrade to Premium for unlimited hosting.',
                 'upgrade_required': True,
             }, status=status.HTTP_402_PAYMENT_REQUIRED)
+
+        if min_players > max_players:
+            return Response({'error': 'min_players cannot be greater than max_players'},
+                            status=status.HTTP_400_BAD_REQUEST)
 
         match = Match.objects.create(
             title=title,
@@ -450,12 +538,17 @@ def create_match(request):
             location=location,
             date_time=date_time,
             max_players=max_players,
+            min_players=min_players,
             price=price,
             skill_level=skill_level,
             organizer=request.user,
             team=team,
+            venue=venue,
             current_players=1,
         )
+        track(request.user, 'match_created', {
+            'sport': sport, 'price': float(price), 'max_players': max_players,
+        })
 
         # Add organizer as participant
         MatchParticipant.objects.create(
@@ -482,10 +575,13 @@ def create_match(request):
                 'location': match.location,
                 'date_time': match.date_time.isoformat(),
                 'max_players': match.max_players,
+                'min_players': match.min_players,
                 'current_players': match.current_players,
                 'price': str(match.price),
                 'skill_level': match.skill_level,
                 'organizer_id': match.organizer.id,
+                'venue_id': match.venue_id,
+                'booking_status': match.booking_status,
             }
         }, status=status.HTTP_201_CREATED)
 
@@ -513,7 +609,8 @@ def get_matches(request):
         if skill and skill in SKILL_LEVELS and skill != 'any':
             qs = qs.filter(skill_level=skill)
 
-        matches = qs.select_related('organizer', 'organizer__profile').order_by(
+        matches = qs.select_related('organizer', 'organizer__profile').prefetch_related(
+            'participants__user').order_by(
             '-organizer__profile__is_premium', 'date_time')[:100]
 
         matches_data = [match_summary(match) for match in matches]
@@ -551,7 +648,8 @@ def get_my_matches(request):
             Favorite.objects.filter(user=request.user, favorite_type='match').values_list('object_id', flat=True)
         )
 
-        queryset = Match.objects.select_related('organizer').all()
+        queryset = Match.objects.select_related('organizer', 'result').prefetch_related(
+            'participants__user').all()
 
         if role == 'hosted':
             queryset = queryset.filter(organizer=request.user)
@@ -578,8 +676,14 @@ def get_my_matches(request):
         else:
             queryset = queryset.distinct().order_by('-date_time')
 
+        my_team_ids = set(
+            Team.objects.filter(owner=request.user).values_list('id', flat=True)
+        ) | set(
+            TeamMember.objects.filter(user=request.user).values_list('team_id', flat=True)
+        )
+
         matches_data = [
-            match_my(match, request.user, joined_ids, saved_ids)
+            match_my(match, request.user, joined_ids, saved_ids, my_team_ids)
             for match in queryset[:200]
         ]
 
@@ -613,6 +717,14 @@ def join_match(request):
 
         with transaction.atomic():
             match = Match.objects.select_for_update().get(id=match_id)
+
+            if not match.is_active:
+                return Response({'error': 'This match has been cancelled'},
+                                status=status.HTTP_400_BAD_REQUEST)
+
+            if match.date_time <= timezone.now():
+                return Response({'error': 'This match has already started'},
+                                status=status.HTTP_400_BAD_REQUEST)
             
             # Check if already a participant
             if MatchParticipant.objects.filter(match=match, user=request.user).exists():
@@ -649,6 +761,23 @@ def join_match(request):
             message=f'{user_name} joined your match "{match.title}".',
             related_match=match,
         )
+
+        # Tell the host the moment the minimum roster is met (field can be booked).
+        if (match.min_players
+                and match.current_players >= match.min_players
+                and match.current_players - 1 < match.min_players):
+            notify(
+                match.organizer,
+                'general',
+                'Ready to book the field',
+                f'"{match.title}" now has {match.current_players} players — '
+                f'the minimum of {match.min_players} is met. You can book the field.',
+                match=match,
+            )
+
+        track(request.user, 'match_joined', {
+            'match_id': match.id, 'sport': match.sport, 'price': float(match.price),
+        })
 
         return Response({
             'message': 'Successfully joined the match',
@@ -711,6 +840,7 @@ def get_match_details(request, match_id):
             if is_organizer or p.user.id == request.user.id:
                 participant_info['email'] = p.user.email
                 participant_info['phone'] = phone
+                participant_info['payment_status'] = p.payment_status
             participants_data.append(participant_info)
 
         organizer_name = display_name(match.organizer)
@@ -724,14 +854,21 @@ def get_match_details(request, match_id):
                 'location': match.location,
                 'date_time': match.date_time.isoformat(),
                 'max_players': match.max_players,
+                'min_players': match.min_players,
                 'current_players': match.current_players,
                 'spots_left': match.max_players - match.current_players,
                 'price': str(match.price),
                 'skill_level': match.skill_level,
                 'organizer_id': match.organizer.id,
                 'organizer_name': organizer_name,
+                'venue_id': match.venue_id,
+                'venue_name': match.venue.name if match.venue else None,
+                'venue_address': match.venue.address if match.venue else None,
+                'venue_city': match.venue.city if match.venue else None,
+                'booking_status': match.booking_status,
                 'is_organizer': is_organizer,
                 'is_participant': is_participant,
+                'escrow': escrow_summary(match) if is_organizer else None,
                 'waitlist_count': match.waitlist.count(),
                 'team_id': match.team.id if match.team else None,
                 'team_name': match.team.name if match.team else None,
@@ -785,28 +922,46 @@ def match_ratings(request, match_id):
 
         rated_user_id = request.data.get('rated_user_id')
         rating = request.data.get('rating')
-        comment = request.data.get('comment', '')
+        comment = sanitize_text(request.data.get('comment', ''))
 
-        if not rated_user_id or not rating:
+        if not rated_user_id or rating is None:
             return Response({'error': 'rated_user_id and rating are required'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
+            rating_value = int(rating)
+        except (TypeError, ValueError):
+            return Response({'error': 'rating must be an integer between 1 and 5'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            comment = validate_optional_string(comment, 5000, 'Comment')
+        except ValueError as e:
+            return Response({'error': _err_msg(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
             rated_user = User.objects.get(id=rated_user_id)
-        except User.DoesNotExist:
+        except (User.DoesNotExist, ValueError, TypeError):
             return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        if int(rating) < 1 or int(rating) > 5:
+        if rating_value < 1 or rating_value > 5:
             return Response({'error': 'Rating must be between 1 and 5'}, status=status.HTTP_400_BAD_REQUEST)
 
         is_participant = MatchParticipant.objects.filter(match=match, user=rater).exists()
         if not is_participant:
             return Response({'error': 'You must be a participant to rate others'}, status=status.HTTP_403_FORBIDDEN)
 
+        if rated_user.id == rater.id:
+            return Response({'error': 'You cannot rate yourself'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not MatchParticipant.objects.filter(match=match, user=rated_user).exists():
+            return Response({'error': 'rated_user is not a participant of this match'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
         rating_obj, created = PlayerRating.objects.update_or_create(
             match=match,
             rater=rater,
             rated_user=rated_user,
-            defaults={'rating': rating, 'comment': comment}
+            defaults={'rating': rating_value, 'comment': comment}
         )
 
         return Response({
@@ -823,147 +978,527 @@ def match_ratings(request, match_id):
 
 
 
+RESULT_EDIT_WINDOW_HOURS = 48
+
+
+def _needed_confirmations(participant_count):
+    """Majority of the *other* participants must confirm (the organizer submitted)."""
+    return max(1, ((participant_count - 1) // 2) + 1)
+
+
+def _result_to_dict(result):
+    return {
+        'id': result.id,
+        'match_id': result.match_id,
+        'match_type': result.match_type,
+        'result_type': result.result_type,
+        'winner_team_id': result.winner_team_id,
+        'winner_user_id': result.winner_user_id,
+        'team1_id': result.team1_id,
+        'team2_id': result.team2_id,
+        'winning_group': result.winning_group,
+        'mvp_user_id': result.mvp_user_id,
+        'score': result.score,
+        'status': result.status,
+        'no_show_user_ids': result.no_show_list,
+        'confirmed_at': result.confirmed_at.isoformat() if result.confirmed_at else None,
+        'notes': result.notes,
+        'created_by': result.created_by.username if result.created_by else None,
+        'created_at': result.created_at.isoformat(),
+    }
+
+
 @api_view(['GET', 'POST', 'PUT'])
 @permission_classes([AllowAny])
 def match_result(request, match_id):
-    """Get or submit match result"""
+    """Get or submit a match result.
+
+    Only the organizer can submit. Results start as `pending`, are confirmed by
+    the participants, and rankings are applied only once confirmed.
+    """
     try:
         match = Match.objects.get(id=match_id)
     except Match.DoesNotExist:
         return Response({'error': 'Match not found'}, status=status.HTTP_404_NOT_FOUND)
 
     if request.method == 'GET':
-        try:
-            result = MatchResult.objects.get(match=match)
-            return Response({
-                'result': {
-                    'id': result.id,
-                    'match_id': match.id,
-                    'match_type': result.match_type,
-                    'result_type': result.result_type,
-                    'winner_team_id': result.winner_team_id,
-                    'winner_user_id': result.winner_user_id,
-                    'mvp_user_id': result.mvp_user_id,
-                    'score': result.score,
-                    'notes': result.notes,
-                    'created_by': result.created_by.username if result.created_by else None,
-                    'created_at': result.created_at.isoformat(),
-                }
-            }, status=status.HTTP_200_OK)
-        except MatchResult.DoesNotExist:
+        result = MatchResult.objects.filter(match=match).first()
+        if not result:
             return Response({'result': None}, status=status.HTTP_200_OK)
-
-    elif request.method in ['POST', 'PUT']:
-        user = request.user
-        if not user.is_authenticated:
-            return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
-
-        if match.organizer.id != user.id:
-            return Response({'error': 'Only the match organizer can set results'}, status=status.HTTP_403_FORBIDDEN)
-
-        try:
-            match_type = validate_enum(request.data.get('match_type', 'pickup'), MATCH_TYPES, 'match_type')
-            result_type = validate_enum(request.data.get('result_type', 'individual'), RESULT_TYPES, 'result_type')
-            winner_team_id = validate_optional_int(request.data.get('winner_team_id'), 1, 999999, 'winner_team_id')
-            winner_user_id = validate_optional_int(request.data.get('winner_user_id'), 1, 999999, 'winner_user_id')
-            winning_group = validate_optional_string(request.data.get('winning_group', ''), 10, 'winning_group')
-            mvp_user_id = validate_optional_int(request.data.get('mvp_user_id'), 1, 999999, 'mvp_user_id')
-            score = validate_optional_string(request.data.get('score', ''), 50, 'score')
-            notes = validate_optional_string(request.data.get('notes', ''), 5000, 'notes')
-            team_groups = request.data.get('team_groups')
-        except ValueError as e:
-            return Response({'error': _err_msg(e)}, status=status.HTTP_400_BAD_REQUEST)
-
-        participant_ids = set(MatchParticipant.objects.filter(match=match).values_list('user_id', flat=True))
-
-        if match_type == 'team_vs_team' and result_type != 'draw' and not winner_team_id:
-            return Response({'error': 'winner_team_id is required for team vs team matches'}, status=status.HTTP_400_BAD_REQUEST)
-
-        if result_type != 'draw':
-            if match_type == 'pickup' and not winner_user_id:
-                return Response({'error': 'winner_user_id is required for non-draw pickup matches'}, status=status.HTTP_400_BAD_REQUEST)
-            if match_type == 'pickup' and winner_user_id and winner_user_id not in participant_ids:
-                return Response({'error': 'winner_user_id is not a participant of this match'}, status=status.HTTP_400_BAD_REQUEST)
-
-        if mvp_user_id and mvp_user_id not in participant_ids:
-            return Response({'error': 'mvp_user_id is not a participant of this match'}, status=status.HTTP_400_BAD_REQUEST)
-
-        with transaction.atomic():
-            result, created = MatchResult.objects.update_or_create(
-                match=match,
-                defaults={
-                    'match_type': match_type,
-                    'result_type': result_type,
-                    'winner_team_id': winner_team_id,
-                    'winner_user_id': winner_user_id,
-                    'winning_group': winning_group,
-                    'mvp_user_id': mvp_user_id,
-                    'score': score,
-                    'notes': notes,
-                    'created_by': user,
-                }
-            )
-
-            if team_groups and isinstance(team_groups, dict):
-                for group, user_ids in team_groups.items():
-                    if group not in ('A', 'B'):
-                        continue
-                    for uid in user_ids:
-                        MatchParticipant.objects.filter(match=match, user_id=uid).update(team_group=group)
-
-            _compute_rankings(match, result)
-
+        total = MatchParticipant.objects.filter(match=match).count()
         return Response({
-            'message': 'Match result saved successfully',
-            'result': {
-                'id': result.id,
-                'match_id': match.id,
-                'match_type': result.match_type,
-                'result_type': result.result_type,
-                'winner_team_id': result.winner_team_id,
-                'winner_user_id': result.winner_user_id,
-                'winning_group': result.winning_group,
-                'mvp_user_id': result.mvp_user_id,
-                'score': result.score,
-                'notes': result.notes,
-            }
-        }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+            'result': _result_to_dict(result),
+            'confirmations': {
+                'confirmed': result.confirmations.filter(status='confirmed').count(),
+                'disputed': result.confirmations.filter(status='disputed').count(),
+                'needed': _needed_confirmations(total),
+            },
+        }, status=status.HTTP_200_OK)
 
-
-
-
-@api_view(['GET'])
-def get_match_recommendations(request):
-    """Get recommended matches for the user"""
     user = request.user
     if not user.is_authenticated:
         return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
 
-    user_sports = []
+    if match.organizer.id != user.id:
+        return Response({'error': 'Only the match organizer can set results'}, status=status.HTTP_403_FORBIDDEN)
+
+    existing = MatchResult.objects.filter(match=match).first()
+    if existing:
+        if existing.status == 'confirmed':
+            return Response({'error': 'This result is confirmed and can no longer be edited'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if timezone.now() - existing.created_at > timedelta(hours=RESULT_EDIT_WINDOW_HOURS):
+            return Response({
+                'error': f'Results can only be edited within {RESULT_EDIT_WINDOW_HOURS}h of the match',
+            }, status=status.HTTP_400_BAD_REQUEST)
+
     try:
-        profile = user.profile
-        if profile.favorite_sports:
-            user_sports = [s.strip() for s in profile.favorite_sports.split(',')]
-    except UserProfile.DoesNotExist:
-        pass
+        match_type = validate_enum(request.data.get('match_type', 'pickup'), MATCH_TYPES, 'match_type')
+        result_type = validate_enum(request.data.get('result_type', 'individual'), RESULT_TYPES, 'result_type')
+        winner_team_id = validate_optional_int(request.data.get('winner_team_id'), 1, 999999, 'winner_team_id')
+        winner_user_id = validate_optional_int(request.data.get('winner_user_id'), 1, 999999, 'winner_user_id')
+        team1_id = validate_optional_int(request.data.get('team1_id'), 1, 999999, 'team1_id')
+        team2_id = validate_optional_int(request.data.get('team2_id'), 1, 999999, 'team2_id')
+        winning_group = validate_optional_string(request.data.get('winning_group', ''), 10, 'winning_group')
+        mvp_user_id = validate_optional_int(request.data.get('mvp_user_id'), 1, 999999, 'mvp_user_id')
+        score = validate_score(request.data.get('score', ''))
+        notes = sanitize_text(validate_optional_string(request.data.get('notes', ''), 5000, 'notes'))
+        team_groups = request.data.get('team_groups')
+        raw_no_shows = request.data.get('no_show_user_ids') or []
+    except ValueError as e:
+        return Response({'error': _err_msg(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-    user_participated_matches = MatchParticipant.objects.filter(user=user).values_list('match_id', flat=True)
-    
-    recommended = Match.objects.filter(
-        date_time__gte=timezone.now(),
-        is_active=True
-    ).exclude(
-        id__in=user_participated_matches
-    ).exclude(
-        organizer=user
-    ).select_related('organizer', 'organizer__profile')
+    participants = list(MatchParticipant.objects.filter(match=match))
+    participant_ids = {p.user_id for p in participants}
 
-    if user_sports:
-        recommended = recommended.filter(sport__in=user_sports)
-    
-    recommended = recommended.order_by(
-        '-organizer__profile__is_premium', 'date_time')[:10]
+    if winning_group and winning_group not in ('A', 'B'):
+        return Response({'error': "winning_group must be 'A' or 'B'"},
+                        status=status.HTTP_400_BAD_REQUEST)
 
-    matches_data = [match_summary(match) for match in recommended]
+    if (match_type == 'team_vs_team' and result_type != 'draw'
+            and winning_group not in ('A', 'B') and not winner_team_id):
+        return Response({'error': 'Provide winner_team_id or winning_group for team vs team matches'},
+                        status=status.HTTP_400_BAD_REQUEST)
 
-    return Response({'recommendations': matches_data}, status=status.HTTP_200_OK)
+    if team1_id and team2_id and team1_id == team2_id:
+        return Response({'error': 'team1_id and team2_id must be different'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    if (match_type == 'team_vs_team' and result_type != 'draw'
+            and winner_team_id and team1_id and team2_id
+            and winner_team_id not in (team1_id, team2_id)):
+        return Response({'error': 'winner_team_id must be team1_id or team2_id'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    if result_type != 'draw':
+        if match_type == 'pickup' and not winner_user_id:
+            return Response({'error': 'winner_user_id is required for non-draw pickup matches'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if match_type == 'pickup' and winner_user_id and winner_user_id not in participant_ids:
+            return Response({'error': 'winner_user_id is not a participant of this match'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+    if mvp_user_id and mvp_user_id not in participant_ids:
+        return Response({'error': 'mvp_user_id is not a participant of this match'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    no_show_ids = []
+    if isinstance(raw_no_shows, (list, tuple)):
+        for x in raw_no_shows:
+            if str(x).strip().isdigit() and int(x) in participant_ids:
+                no_show_ids.append(int(x))
+
+    with transaction.atomic():
+        result, created = MatchResult.objects.update_or_create(
+            match=match,
+            defaults={
+                'match_type': match_type,
+                'result_type': result_type,
+                'winner_team_id': winner_team_id,
+                'winner_user_id': winner_user_id,
+                'team1_id': team1_id,
+                'team2_id': team2_id,
+                'winning_group': winning_group,
+                'mvp_user_id': mvp_user_id,
+                'score': score,
+                'no_show_user_ids': ','.join(str(x) for x in no_show_ids),
+                'notes': notes,
+                'created_by': user,
+                'status': 'pending',
+                'rankings_applied': False,
+                'confirmed_at': None,
+            },
+        )
+        # A re-submitted result resets any previous votes.
+        result.confirmations.all().delete()
+
+        if team_groups and isinstance(team_groups, dict):
+            for group, user_ids in team_groups.items():
+                if group not in ('A', 'B'):
+                    continue
+                for uid in user_ids:
+                    MatchParticipant.objects.filter(match=match, user_id=uid).update(team_group=group)
+
+        # Solo matches have nobody to confirm.
+        if len(participants) <= 1:
+            result.status = 'confirmed'
+            result.confirmed_at = timezone.now()
+            result.save(update_fields=['status', 'confirmed_at'])
+            _apply_result_rankings(match, result)
+
+    pending = result.status == 'pending'
+    return Response({
+        'message': 'Match result saved — awaiting player confirmation' if pending else 'Match result saved',
+        'result': _result_to_dict(result),
+        'confirmations': {
+            'confirmed': 0,
+            'disputed': 0,
+            'needed': _needed_confirmations(len(participants)),
+        },
+    }, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+def confirm_match_result(request, match_id):
+    """A participant confirms or disputes the recorded result."""
+    try:
+        match = Match.objects.get(id=match_id)
+    except Match.DoesNotExist:
+        return Response({'error': 'Match not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    result = MatchResult.objects.filter(match=match).first()
+    if not result:
+        return Response({'error': 'No result recorded yet'}, status=status.HTTP_404_NOT_FOUND)
+
+    if not MatchParticipant.objects.filter(match=match, user=request.user).exists():
+        return Response({'error': 'Only match participants can confirm the result'},
+                        status=status.HTTP_403_FORBIDDEN)
+
+    if result.status == 'confirmed':
+        return Response({'success': True, 'status': 'confirmed', 'message': 'Result already confirmed'})
+
+    try:
+        vote = validate_enum(request.data.get('status', 'confirmed'), {'confirmed', 'disputed'}, 'status')
+        note = sanitize_text(validate_optional_string(request.data.get('note', ''), 300, 'Note'))
+    except ValueError as e:
+        return Response({'error': _err_msg(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    MatchResultConfirmation.objects.update_or_create(
+        result=result, user=request.user, defaults={'status': vote, 'note': note})
+
+    if vote == 'disputed':
+        result.status = 'disputed'
+        result.save(update_fields=['status'])
+        notify(match.organizer, 'match_result_disputed', 'Result disputed',
+               f'"{match.title}" result was disputed by a player.', match=match)
+        return Response({'success': True, 'status': 'disputed', 'message': 'Result disputed'})
+
+    total = MatchParticipant.objects.filter(match=match).count()
+    confirms = result.confirmations.filter(status='confirmed').count()
+    needed = _needed_confirmations(total)
+
+    if confirms >= needed:
+        result.status = 'confirmed'
+        result.confirmed_at = timezone.now()
+        result.save(update_fields=['status', 'confirmed_at'])
+        forfeited = forfeit_no_shows(match, result.no_show_list)
+        released = release_match_funds(match)
+        _apply_result_rankings(match, result)
+        return Response({'success': True, 'status': 'confirmed',
+                         'released': str(released), 'forfeited': str(forfeited),
+                         'message': 'Result confirmed — rankings updated'})
+
+    return Response({
+        'success': True,
+        'status': 'pending',
+        'message': f'Thanks! {confirms}/{needed} confirmations',
+        'confirmations': {'confirmed': confirms, 'needed': needed},
+    })
+
+
+@api_view(['POST'])
+def mark_match_payments(request, match_id):
+    """Organizer records which players have paid their share."""
+    try:
+        match = Match.objects.get(id=match_id)
+    except Match.DoesNotExist:
+        return Response({'error': 'Match not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if match.organizer.id != request.user.id:
+        return Response({'error': 'Only the organizer can record payments'}, status=status.HTTP_403_FORBIDDEN)
+
+    raw = request.data.get('paid_user_ids') or []
+    paid_ids = [int(x) for x in raw if str(x).strip().isdigit()] if isinstance(raw, (list, tuple)) else []
+
+    participant_ids = set(MatchParticipant.objects.filter(match=match).values_list('user_id', flat=True))
+    paid_ids = [uid for uid in paid_ids if uid in participant_ids]
+
+    # Never clobber escrow that was actually settled through the gateway or
+    # that has already been refunded/released.
+    gateway_paid_ids = set(Payment.objects.filter(
+        payment_type='match_share', reference_type='match',
+        reference_id=match.id, status='success',
+    ).values_list('user_id', flat=True))
+    locked_statuses = ('released', 'refunded', 'partially_refunded', 'forfeited')
+
+    editable = MatchParticipant.objects.filter(match=match).exclude(
+        Q(user_id__in=gateway_paid_ids) | Q(payment_status__in=locked_statuses))
+    editable.update(paid=False, paid_at=None, amount_paid=0, payment_status='unpaid')
+
+    now = timezone.now()
+    if paid_ids:
+        MatchParticipant.objects.filter(match=match, user_id__in=paid_ids).exclude(
+            Q(user_id__in=gateway_paid_ids) | Q(payment_status__in=locked_statuses)
+        ).update(paid=True, paid_at=now, amount_paid=match.price, payment_status='held')
+
+    paid_count = MatchParticipant.objects.filter(match=match, paid=True).count()
+    total = len(participant_ids)
+    return Response({
+        'success': True,
+        'paid_count': paid_count,
+        'total': total,
+        'collected': str(match.price * paid_count),
+        'expected': str(match.price * total),
+    })
+
+
+@api_view(['POST'])
+@throttle_classes([SensitiveWriteThrottle])
+def pay_match_share(request, match_id):
+    """Start an escrow payment for the caller's share of a match."""
+    try:
+        match = Match.objects.get(id=match_id)
+    except Match.DoesNotExist:
+        return Response({'error': 'Match not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if not match.is_active:
+        return Response({'error': 'This match is no longer active'}, status=status.HTTP_400_BAD_REQUEST)
+
+    participant = MatchParticipant.objects.filter(match=match, user=request.user).first()
+    if not participant:
+        return Response({'error': 'Join the match before paying'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if participant.payment_status in ('held', 'released'):
+        return Response({'success': True, 'already_paid': True,
+                         'payment_status': participant.payment_status})
+
+    if match.price <= 0:
+        return Response({'success': False, 'message': 'This match is free — no payment needed'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    tx_ref = f"RIVALINK-M{match.id}U{request.user.id}-{uuid.uuid4().hex[:8].upper()}"
+    payment = Payment.objects.create(
+        user=request.user,
+        tx_ref=tx_ref,
+        amount=match.price,
+        currency='ETB',
+        payment_type='match_share',
+        reference_type='match',
+        reference_id=match.id,
+        description=f'Share for "{match.title}"',
+    )
+
+    chapa_secret = getattr(settings, 'CHAPA_SECRET_KEY', '')
+    if not chapa_secret:
+        if settings.DEBUG:
+            # Dev fallback so the escrow flow is testable without a gateway.
+            payment.status = 'success'
+            payment.save(update_fields=['status'])
+            hold(participant)
+            return Response({'success': True, 'mock': True, 'tx_ref': tx_ref,
+                             'payment_status': participant.payment_status})
+        payment.status = 'failed'
+        payment.save(update_fields=['status'])
+        return Response({'success': False, 'message': 'Payment system not configured'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    payload = {
+        'amount': str(match.price),
+        'currency': 'ETB',
+        'email': request.user.email,
+        'tx_ref': tx_ref,
+        'callback_url': f'{settings.SITE_URL}/api/payments/webhook/',
+        'return_url': request.data.get('return_url', ''),
+        'customization': {
+            'title': 'Rivalink share',
+            'description': f'Match {match.id} share',
+        },
+    }
+    try:
+        resp = http_requests.post(
+            'https://api.chapa.co/v1/transaction/initialize',
+            json=payload,
+            headers={'Authorization': f'Bearer {chapa_secret}', 'Content-Type': 'application/json'},
+            timeout=30,
+        )
+        data = resp.json()
+        if resp.status_code == 200 and data.get('status') == 'success':
+            payment.chapa_tx_id = data.get('data', {}).get('tx_ref', tx_ref)
+            payment.save(update_fields=['chapa_tx_id'])
+            return Response({'success': True,
+                             'checkout_url': data.get('data', {}).get('checkout_url', ''),
+                             'tx_ref': tx_ref})
+        payment.status = 'failed'
+        payment.save(update_fields=['status'])
+        return Response({'success': False, 'message': data.get('message', 'Payment initialization failed')},
+                        status=status.HTTP_400_BAD_REQUEST)
+    except http_requests.RequestException:
+        payment.status = 'failed'
+        payment.save(update_fields=['status'])
+        return Response({'success': False, 'message': 'Payment service unavailable. Try again.'},
+                        status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+
+# ── Field booking: host requests, every player confirms, then it's booked ──
+
+def _book_field_for_match(match):
+    """Book the venue for this match and release the escrow to pay it."""
+    venue = match.venue
+    local_dt = timezone.localtime(match.date_time)
+    end_dt = local_dt + timedelta(hours=BOOKING_SLOT_HOURS)
+    total_price = money(venue.slot_price)
+
+    booking = VenueBooking.objects.filter(match=match).first()
+    if booking is None:
+        booking = VenueBooking(
+            match=match, venue=venue, booked_by=match.organizer,
+            date=local_dt.date(), start_time=local_dt.time().replace(second=0, microsecond=0),
+            end_time=end_dt.time().replace(second=0, microsecond=0),
+            hours=BOOKING_SLOT_HOURS, total_price=total_price,
+        )
+    booking.status = 'confirmed'
+    booking.save()
+
+    released = release_match_funds(match)
+
+    commission = venue_commission(booking.total_price)
+    record_transaction(
+        'venue_commission', commission, payer=match.organizer,
+        reference_type='venue_booking', reference_id=booking.id,
+        note=f'Commission on {venue.name} (match #{match.id})',
+    )
+
+    match.booking_status = 'confirmed'
+    match.booking_confirmed_at = timezone.now()
+    match.save(update_fields=['booking_status', 'booking_confirmed_at'])
+
+    for p in MatchParticipant.objects.filter(match=match).select_related('user'):
+        notify(p.user, 'booking_confirmed', 'Field booked',
+               f'{venue.name} is booked for "{match.title}". See you there!', match=match)
+
+    return {
+        'booking_id': booking.id,
+        'venue': venue.name,
+        'slot_price': str(booking.total_price),
+        'released': str(released),
+    }
+
+
+@api_view(['POST'])
+@throttle_classes([SensitiveWriteThrottle])
+def request_venue_booking(request, match_id):
+    """Host asks every joined player to confirm before the field is booked."""
+    try:
+        match = Match.objects.get(id=match_id)
+    except Match.DoesNotExist:
+        return Response({'error': 'Match not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if match.organizer.id != request.user.id:
+        return Response({'error': 'Only the organizer can request the booking'},
+                        status=status.HTTP_403_FORBIDDEN)
+    if not match.is_active:
+        return Response({'error': 'This match is cancelled'}, status=status.HTTP_400_BAD_REQUEST)
+    if not match.venue:
+        return Response({'error': 'Attach a venue to this match first'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    if match.booking_status == 'confirmed':
+        return Response({'error': 'The field is already booked'}, status=status.HTTP_400_BAD_REQUEST)
+
+    participants = MatchParticipant.objects.filter(match=match)
+    unpaid = participants.exclude(user_id=match.organizer_id).filter(payment_status='unpaid').count()
+    if unpaid:
+        return Response({
+            'error': f'{unpaid} player(s) have not paid their share yet. '
+                     'Everyone must pay before the field is booked.',
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    if participants.count() < max(1, match.min_players):
+        return Response({
+            'error': f'Need at least {match.min_players} players before booking '
+                     f'(currently {participants.count()}).',
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    match.booking_status = 'requested'
+    match.booking_requested_at = timezone.now()
+    match.save(update_fields=['booking_status', 'booking_requested_at'])
+    participants.update(booking_confirmed=False, booking_confirmed_at=None)
+
+    for p in participants.exclude(user=request.user).select_related('user'):
+        notify(
+            p.user, 'booking_request', 'Confirm the field booking',
+            f'"{match.title}" is about to book {match.venue.name}. '
+            f'Confirm to lock it in — your Br {match.price} becomes non-refundable '
+            f'once the field is booked.',
+            match=match,
+        )
+
+    return Response({
+        'success': True,
+        'booking_status': 'requested',
+        'players': participants.count(),
+        'confirmed': 0,
+        'note': 'Every player must confirm before the field is booked.',
+    })
+
+
+@api_view(['POST'])
+def confirm_venue_booking(request, match_id):
+    """A player confirms the field booking (accepts the non-refundable share)."""
+    try:
+        match = Match.objects.get(id=match_id)
+    except Match.DoesNotExist:
+        return Response({'error': 'Match not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    participant = MatchParticipant.objects.filter(match=match, user=request.user).first()
+    if not participant:
+        return Response({'error': 'Only joined players can confirm'},
+                        status=status.HTTP_403_FORBIDDEN)
+
+    if match.booking_status == 'confirmed':
+        return Response({'success': True, 'booking_status': 'confirmed',
+                         'message': 'Field already booked'})
+    if match.booking_status != 'requested':
+        return Response({'error': 'The host has not requested a booking yet'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    participant.booking_confirmed = True
+    participant.booking_confirmed_at = timezone.now()
+    participant.save(update_fields=['booking_confirmed', 'booking_confirmed_at'])
+
+    if not all_players_confirmed(match):
+        total = MatchParticipant.objects.filter(match=match).exclude(user_id=match.organizer_id).count()
+        confirmed = MatchParticipant.objects.filter(
+            match=match, booking_confirmed=True).exclude(user_id=match.organizer_id).count()
+        return Response({
+            'success': True,
+            'booking_status': 'requested',
+            'confirmed': confirmed,
+            'players': total,
+            'message': f'Confirmed {confirmed}/{total} — waiting for the rest',
+        })
+
+    booked = _book_field_for_match(match)
+    return Response({'success': True, 'booking_status': 'confirmed',
+                     'message': 'Everyone confirmed — field booked!', **booked})
+
+
+@api_view(['GET'])
+def get_match_recommendations(request):
+    """Get ranked, personalized match recommendations for the user."""
+    user = request.user
+    if not user.is_authenticated:
+        return Response({'error': 'Authentication required'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    from .engagement import recommend_matches
+    return Response({'recommendations': recommend_matches(user, limit=10)},
+                    status=status.HTTP_200_OK)

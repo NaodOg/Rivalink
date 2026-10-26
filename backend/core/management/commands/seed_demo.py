@@ -15,7 +15,7 @@ from core.models import (
     Venue, VenueBooking, Referee, RefereeBooking, Notification,
     UserSportRating, TeamRanking,
 )
-from core.views import _generate_bracket, _advance_winner, _check_tournament_complete
+from core.view_shared import _generate_bracket, _advance_winner, _check_tournament_complete
 
 
 class Command(BaseCommand):

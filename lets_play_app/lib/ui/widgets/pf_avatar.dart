@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/data/media_config.dart';
@@ -15,10 +16,22 @@ class PFAvatar extends StatelessWidget {
     return n.isEmpty ? '?' : n[0].toUpperCase();
   }
 
+  Widget _initialText() {
+    return Center(
+      child: Text(
+        _initial,
+        style: TextStyle(
+          color: PFColors.textSecondary,
+          fontWeight: FontWeight.w700,
+          fontSize: size * 0.4,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final resolved = MediaConfig.resolve(imageUrl);
-    final hasImage = resolved != null;
     return Container(
       width: size,
       height: size,
@@ -26,20 +39,17 @@ class PFAvatar extends StatelessWidget {
         color: PFColors.surfaceHigh,
         shape: BoxShape.circle,
         border: Border.all(color: PFColors.border),
-        image: hasImage
-            ? DecorationImage(image: NetworkImage(resolved), fit: BoxFit.cover)
-            : null,
       ),
-      alignment: Alignment.center,
-      child: hasImage
-          ? null
-          : Text(
-              _initial,
-              style: TextStyle(
-                color: PFColors.textSecondary,
-                fontWeight: FontWeight.w700,
-                fontSize: size * 0.4,
-              ),
+      clipBehavior: Clip.antiAlias,
+      child: resolved == null
+          ? _initialText()
+          : CachedNetworkImage(
+              imageUrl: resolved,
+              width: size,
+              height: size,
+              fit: BoxFit.cover,
+              placeholder: (_, __) => const SizedBox.shrink(),
+              errorWidget: (_, __, ___) => _initialText(),
             ),
     );
   }

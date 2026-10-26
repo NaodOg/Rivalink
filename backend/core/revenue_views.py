@@ -12,7 +12,9 @@ def revenue_summary(request):
     if not request.user.is_authenticated or not request.user.is_staff:
         return Response({'error': 'Not authorized'}, status=status.HTTP_403_FORBIDDEN)
 
-    qs = PlatformTransaction.objects.all()
+    # `match_share` is escrow money passing through to the host, not platform
+    # revenue, so it is excluded from the totals.
+    qs = PlatformTransaction.objects.exclude(kind='match_share')
     by_kind = (
         qs.values('kind')
         .annotate(total=Sum('amount'), count=Count('id'))

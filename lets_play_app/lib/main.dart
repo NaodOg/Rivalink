@@ -30,17 +30,25 @@ import 'ui/screens/referee_screen.dart';
 import 'ui/screens/my_teams_screen.dart';
 import 'ui/screens/phone_verify_screen.dart';
 import 'core/l10n/l10n.dart';
+import 'core/data/services/analytics_service.dart';
+import 'core/navigation/analytics_observer.dart';
 import 'ui/screens/splash_screen.dart';
 import 'ui/screens/team_details_screen.dart';
 import 'ui/screens/subscription_screen.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const RivalinkApp());
+  await AnalyticsService.init();
+  final session = SessionController(AppRepository());
+  await session.hydrate();
+  final homeRoute = await resolveInitialRoute(session);
+  runApp(RivalinkApp(session: session, homeRoute: homeRoute));
 }
 
 class RivalinkApp extends StatefulWidget {
-  const RivalinkApp({super.key});
+  final SessionController session;
+  final String homeRoute;
+  const RivalinkApp({super.key, required this.session, required this.homeRoute});
 
   @override
   State<RivalinkApp> createState() => _RivalinkAppState();
@@ -48,7 +56,7 @@ class RivalinkApp extends StatefulWidget {
 
 class _RivalinkAppState extends State<RivalinkApp> {
   final AppRepository _repo = AppRepository();
-  late final SessionController _session = SessionController(_repo);
+  late final SessionController _session = widget.session;
 
   @override
   void initState() {
@@ -61,70 +69,71 @@ class _RivalinkAppState extends State<RivalinkApp> {
     final args = settings.arguments;
     switch (settings.name) {
       case AppRoutes.splash:
-        return MaterialPageRoute(builder: (_) => SplashScreen(session: _session));
+        return MaterialPageRoute(settings: settings, 
+            builder: (_) => SplashScreen(session: _session, nextRoute: widget.homeRoute));
       case AppRoutes.onboarding:
-        return MaterialPageRoute(builder: (_) => const OnboardingScreen());
+        return MaterialPageRoute(settings: settings, builder: (_) => const OnboardingScreen());
       case AppRoutes.auth:
-        return MaterialPageRoute(builder: (_) => AuthScreen(session: _session));
+        return MaterialPageRoute(settings: settings, builder: (_) => AuthScreen(session: _session));
       case AppRoutes.shell:
-        return MaterialPageRoute(builder: (_) => ShellScreen(session: _session, repo: _repo));
+        return MaterialPageRoute(settings: settings, builder: (_) => ShellScreen(session: _session, repo: _repo));
       case AppRoutes.home:
-        return MaterialPageRoute(builder: (_) => ShellScreen(session: _session, repo: _repo, initialIndex: 0));
+        return MaterialPageRoute(settings: settings, builder: (_) => ShellScreen(session: _session, repo: _repo, initialIndex: 0));
       case AppRoutes.exploreMatches:
-        return MaterialPageRoute(builder: (_) => ShellScreen(session: _session, repo: _repo, initialIndex: 1));
+        return MaterialPageRoute(settings: settings, builder: (_) => ShellScreen(session: _session, repo: _repo, initialIndex: 1));
       case AppRoutes.matchDetails:
-        return MaterialPageRoute(builder: (_) => MatchDetailsScreen(session: _session, repo: _repo, matchId: args as int));
+        return MaterialPageRoute(settings: settings, builder: (_) => MatchDetailsScreen(session: _session, repo: _repo, matchId: args as int));
       case AppRoutes.hostMatch:
-        return MaterialPageRoute(builder: (_) => HostMatchScreen(session: _session, repo: _repo));
+        return MaterialPageRoute(settings: settings, builder: (_) => HostMatchScreen(session: _session, repo: _repo));
       case AppRoutes.bookField:
-        return MaterialPageRoute(
+        return MaterialPageRoute(settings: settings, 
             builder: (_) => ShellScreen(
                 session: _session, repo: _repo, initialIndex: 1, startExploreVenues: true));
       case AppRoutes.addField:
-        return MaterialPageRoute(builder: (_) => AddFieldScreen(session: _session, repo: _repo));
+        return MaterialPageRoute(settings: settings, builder: (_) => AddFieldScreen(session: _session, repo: _repo));
       case AppRoutes.fieldDetails:
-        return MaterialPageRoute(builder: (_) => FieldDetailsScreen(session: _session, repo: _repo, fieldId: args as int));
+        return MaterialPageRoute(settings: settings, builder: (_) => FieldDetailsScreen(session: _session, repo: _repo, fieldId: args as int));
       case AppRoutes.myBookings:
-        return MaterialPageRoute(builder: (_) => MyBookingsScreen(repo: _repo));
+        return MaterialPageRoute(settings: settings, builder: (_) => MyBookingsScreen(repo: _repo));
       case AppRoutes.teamDetails:
         final map = args as Map<String, dynamic>;
-        return MaterialPageRoute(builder: (_) => TeamDetailsScreen(session: _session, repo: _repo, teamId: map['id'] as int, teamName: map['name'] as String));
+        return MaterialPageRoute(settings: settings, builder: (_) => TeamDetailsScreen(session: _session, repo: _repo, teamId: map['id'] as int, teamName: map['name'] as String));
       case AppRoutes.leagueDetails:
         final map = args as Map<String, dynamic>;
-        return MaterialPageRoute(builder: (_) => LeagueDetailsScreen(session: _session, repo: _repo, leagueId: map['id'] as int, leagueName: map['name'] as String));
+        return MaterialPageRoute(settings: settings, builder: (_) => LeagueDetailsScreen(session: _session, repo: _repo, leagueId: map['id'] as int, leagueName: map['name'] as String));
       case AppRoutes.createLeague:
-        return MaterialPageRoute(builder: (_) => CreateLeagueScreen(session: _session, repo: _repo));
+        return MaterialPageRoute(settings: settings, builder: (_) => CreateLeagueScreen(session: _session, repo: _repo));
       case AppRoutes.leagues:
-        return MaterialPageRoute(builder: (_) => ShellScreen(session: _session, repo: _repo, initialIndex: 2));
+        return MaterialPageRoute(settings: settings, builder: (_) => ShellScreen(session: _session, repo: _repo, initialIndex: 2));
       case AppRoutes.rankings:
-        return MaterialPageRoute(builder: (_) => RankingScreen(session: _session, repo: _repo));
+        return MaterialPageRoute(settings: settings, builder: (_) => RankingScreen(session: _session, repo: _repo));
       case AppRoutes.friends:
-        return MaterialPageRoute(builder: (_) => FriendsScreen(session: _session, repo: _repo));
+        return MaterialPageRoute(settings: settings, builder: (_) => FriendsScreen(session: _session, repo: _repo));
       case AppRoutes.tournaments:
-        return MaterialPageRoute(builder: (_) => TournamentsScreen(session: _session, repo: _repo));
+        return MaterialPageRoute(settings: settings, builder: (_) => TournamentsScreen(session: _session, repo: _repo));
       case AppRoutes.tournamentDetails:
         final map = args as Map<String, dynamic>;
-        return MaterialPageRoute(
+        return MaterialPageRoute(settings: settings, 
             builder: (_) => TournamentDetailScreen(
                 session: _session,
                 repo: _repo,
                 tournamentId: map['id'] as int,
                 tournamentName: map['name'] as String));
       case AppRoutes.myVenues:
-        return MaterialPageRoute(builder: (_) => VenueDashboardScreen(session: _session, repo: _repo));
+        return MaterialPageRoute(settings: settings, builder: (_) => VenueDashboardScreen(session: _session, repo: _repo));
       case AppRoutes.myTeams:
-        return MaterialPageRoute(builder: (_) => MyTeamsScreen(session: _session, repo: _repo));
+        return MaterialPageRoute(settings: settings, builder: (_) => MyTeamsScreen(session: _session, repo: _repo));
       case AppRoutes.referees:
-        return MaterialPageRoute(builder: (_) => RefereeScreen(session: _session, repo: _repo));
+        return MaterialPageRoute(settings: settings, builder: (_) => RefereeScreen(session: _session, repo: _repo));
       case AppRoutes.phoneVerify:
-        return MaterialPageRoute(builder: (_) => PhoneVerifyScreen(session: _session));
+        return MaterialPageRoute(settings: settings, builder: (_) => PhoneVerifyScreen(session: _session));
       case AppRoutes.profile:
-        return MaterialPageRoute(builder: (_) => ShellScreen(session: _session, repo: _repo, initialIndex: 3));
+        return MaterialPageRoute(settings: settings, builder: (_) => ShellScreen(session: _session, repo: _repo, initialIndex: 3));
       case AppRoutes.notifications:
-        return MaterialPageRoute(builder: (_) => NotificationsScreen(session: _session, repo: _repo));
+        return MaterialPageRoute(settings: settings, builder: (_) => NotificationsScreen(session: _session, repo: _repo));
       case AppRoutes.chat:
         final map = args as Map<String, dynamic>;
-        return MaterialPageRoute(builder: (_) => ChatScreen(
+        return MaterialPageRoute(settings: settings, builder: (_) => ChatScreen(
           session: _session,
           repo: _repo,
           matchId: map['matchId'] as int?,
@@ -132,15 +141,19 @@ class _RivalinkAppState extends State<RivalinkApp> {
           title: map['title'] as String,
         ));
       case AppRoutes.payments:
-        return MaterialPageRoute(builder: (_) => const PaymentsScreen());
+        return MaterialPageRoute(settings: settings, builder: (_) => const PaymentsScreen());
       case AppRoutes.settings:
-        return MaterialPageRoute(builder: (_) => SettingsScreen(session: _session));
+        return MaterialPageRoute(settings: settings, builder: (_) => SettingsScreen(session: _session));
       case AppRoutes.subscription:
-        return MaterialPageRoute(builder: (_) => SubscriptionScreen(token: _session.token ?? ''));
+        final token = _session.token;
+        if (token == null) {
+          return MaterialPageRoute(settings: settings, builder: (_) => AuthScreen(session: _session));
+        }
+        return MaterialPageRoute(settings: settings, builder: (_) => SubscriptionScreen(token: token));
       case AppRoutes.editProfile:
-        return MaterialPageRoute(builder: (_) => EditProfileScreen(session: _session, repo: _repo));
+        return MaterialPageRoute(settings: settings, builder: (_) => EditProfileScreen(session: _session, repo: _repo));
       default:
-        return MaterialPageRoute(builder: (_) => SplashScreen(session: _session));
+        return MaterialPageRoute(settings: settings, builder: (_) => AuthScreen(session: _session));
     }
   }
 
@@ -152,6 +165,7 @@ class _RivalinkAppState extends State<RivalinkApp> {
         debugShowCheckedModeBanner: false,
         title: 'Rivalink',
         theme: RivalinkTheme.dark,
+        navigatorObservers: [AnalyticsObserver()],
         initialRoute: AppRoutes.splash,
         onGenerateRoute: _route,
       ),

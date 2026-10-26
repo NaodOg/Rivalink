@@ -8,6 +8,7 @@ class PFSectionHeader extends StatelessWidget {
   final String? action;
   final VoidCallback? onAction;
   final Widget? trailing;
+  final Color? accent;
 
   const PFSectionHeader({
     super.key,
@@ -16,6 +17,7 @@ class PFSectionHeader extends StatelessWidget {
     this.action,
     this.onAction,
     this.trailing,
+    this.accent,
   });
 
   @override
@@ -28,8 +30,25 @@ class PFSectionHeader extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (eyebrow != null) ...[
-                Text(eyebrow!.toUpperCase(),
-                    style: Theme.of(context).textTheme.labelSmall),
+                Row(
+                  children: [
+                    if (accent != null) ...[
+                      Container(
+                        width: 6,
+                        height: 6,
+                        decoration:
+                            BoxDecoration(color: accent, shape: BoxShape.circle),
+                      ),
+                      const SizedBox(width: 6),
+                    ],
+                    Flexible(
+                      child: Text(eyebrow!.toUpperCase(),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.labelSmall),
+                    ),
+                  ],
+                ),
                 const SizedBox(height: 3),
               ],
               Text(title, style: Theme.of(context).textTheme.headlineSmall),

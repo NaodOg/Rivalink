@@ -37,6 +37,7 @@ def display_name(user):
 # ── Matches ──
 
 def match_summary(match):
+    participants = list(match.participants.all())[:3]
     return {
         'id': match.id,
         'title': match.title,
@@ -51,16 +52,38 @@ def match_summary(match):
         'skill_level': getattr(match, 'skill_level', 'any'),
         'organizer_id': match.organizer.id,
         'organizer_name': display_name(match.organizer),
+        'participants_preview': [display_name(p.user) for p in participants],
     }
 
 
-def match_my(match, user, joined_ids, saved_ids):
+def _match_outcome(match, user, joined_ids, my_team_ids):
+    """W/D/L for the user once a result is confirmed, else None."""
+    result = getattr(match, 'result', None)
+    if not result or result.status != 'confirmed':
+        return None
+    if result.result_type == 'draw':
+        return 'draw'
+    participated = match.id in joined_ids or match.organizer_id == user.id
+    if result.winner_user_id is not None:
+        if result.winner_user_id == user.id:
+            return 'win'
+        return 'loss' if participated else None
+    if result.winner_team_id is not None and my_team_ids:
+        if result.winner_team_id in my_team_ids:
+            return 'win'
+        if {result.team1_id, result.team2_id} & my_team_ids:
+            return 'loss'
+    return None
+
+
+def match_my(match, user, joined_ids, saved_ids, my_team_ids=None):
     data = match_summary(match)
     data.update({
         'is_organizer': match.organizer.id == user.id,
         'is_joined': match.id in joined_ids,
         'is_saved': match.id in saved_ids,
         'match_status': 'upcoming' if match.date_time >= timezone.now() else 'past',
+        'outcome': _match_outcome(match, user, joined_ids, my_team_ids or set()),
     })
     return data
 
@@ -84,6 +107,7 @@ def match_history(match, user):
 # ── Leagues ──
 
 def league_summary(league):
+    recent_members = sorted(league.members.all(), key=lambda m: m.joined_at)[:3]
     return {
         'id': league.id,
         'name': league.name,
@@ -95,12 +119,39 @@ def league_summary(league):
         'entry_fee': str(league.entry_fee),
         'prize': league.prize,
         'start_date': league.start_date.isoformat(),
+        'end_date': league.end_date.isoformat() if league.end_date else None,
         'location': league.location,
+        'status': league.status,
+        'points_win': league.points_win,
+        'points_draw': league.points_draw,
+        'double_round_robin': league.double_round_robin,
+        'champion_team_id': league.champion_id,
+        'champion_team_name': league.champion.name if league.champion else None,
+        'is_active': league.is_active,
+        'team_names': [m.team.name for m in recent_members],
         'organizer_name': display_name(league.organizer),
     }
 
 
-def league_standing(member, rank):
+def league_fixture_to_dict(fixture):
+    return {
+        'id': fixture.id,
+        'league_id': fixture.league_id,
+        'round_number': fixture.round_number,
+        'home_team_id': fixture.home_team_id,
+        'home_team_name': fixture.home_team.name,
+        'away_team_id': fixture.away_team_id,
+        'away_team_name': fixture.away_team.name,
+        'kickoff': fixture.kickoff.isoformat() if fixture.kickoff else None,
+        'match_id': fixture.match_id,
+        'home_score': fixture.home_score,
+        'away_score': fixture.away_score,
+        'is_walkover': fixture.is_walkover,
+        'status': fixture.status,
+    }
+
+
+def league_standing(member, rank, is_mine=False):
     return {
         'rank': rank,
         'team_id': member.team.id,
@@ -114,6 +165,8 @@ def league_standing(member, rank):
         'goal_difference': member.goal_difference,
         'matches_played': member.matches_played,
         'win_rate': round(member.win_rate, 1),
+        'prev_rank': member.prev_rank,
+        'is_mine': is_mine,
     }
 
 
@@ -200,6 +253,8 @@ def venue_booking_to_dict(booking):
         'hours': booking.hours,
         'total_price': float(booking.total_price),
         'status': booking.status,
+        'payment_status': booking.payment_status,
+        'paid_at': booking.paid_at.isoformat() if booking.paid_at else None,
         'notes': booking.notes,
         'created_at': booking.created_at.isoformat(),
     }
