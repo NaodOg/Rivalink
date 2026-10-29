@@ -33,6 +33,8 @@ class AppRoutes {
   static const notifications = '/notifications';
   static const chat = '/chat';
   static const payments = '/payments';
+  static const hostEarnings = '/host-earnings';
+  static const credits = '/credits';
   static const subscription = '/subscription';
   static const settings = '/settings';
   static const editProfile = '/edit-profile';

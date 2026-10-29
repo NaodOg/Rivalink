@@ -20,7 +20,7 @@ LEAGUE_FEE_RATE = Decimal('0.12')          # 12% of a league entry fee
 BOOKING_SLOT_HOURS = 2
 
 # ── Match escrow & cancellation policy ───────────────────────────────────
-MATCH_AUTO_CANCEL_HOURS = 6           # check the minimum this long before kickoff
+MATCH_AUTO_CANCEL_HOURS = 36          # booking/roster deadline before kickoff
 CANCEL_FULL_REFUND_HOURS = 24         # leaving >= this early -> full refund
 CANCEL_PARTIAL_REFUND_HOURS = 6       # leaving >= this early -> partial refund
 CANCEL_PARTIAL_REFUND_PERCENT = 50    # percent refunded in the partial window
@@ -28,6 +28,8 @@ RESULT_AUTO_CONFIRM_HOURS = 48        # auto-confirm an undisputed result after 
 DEFAULT_VENUE_CANCEL_HOURS = 24       # default venue cancellation window
 HOST_CANCEL_STRIKE_LIMIT = 3          # late host cancellations before suspension
 HOST_SUSPENSION_DAYS = 30             # how long a suspended host must wait
+HOST_PAYOUT_MIN_ETB = Decimal('100.00')  # minimum withdrawal request
+FIELD_SERVICE_FEE_ETB = Decimal('250.00')  # flat platform fee on a booked field
 
 TWO_PLACES = Decimal('0.01')
 

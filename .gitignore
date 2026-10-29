@@ -5,6 +5,7 @@ backend/**/*.pyc
 backend/db.sqlite3
 backend/media/
 backend/.env
+backend/reports/
 
 # Flutter
 lets_play_app/build/

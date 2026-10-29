@@ -33,7 +33,7 @@ class _VenueDashboardScreenState extends State<VenueDashboardScreen> {
   String _selectedDate = '';
   String _scope = 'upcoming';
   String _statusFilter = 'all';
-  static const _statusOptions = ['all', 'pending', 'confirmed', 'completed', 'cancelled'];
+  static const _statusOptions = ['all', 'pending', 'reserved', 'confirmed', 'completed', 'cancelled'];
 
   @override
   void initState() {
@@ -377,7 +377,9 @@ class _VenueDashboardScreenState extends State<VenueDashboardScreen> {
           ),
           const SizedBox(height: PFSpacing.md),
           ...slots.map((s) {
+            final reserved = s['status'] == 'reserved';
             final booked = s['status'] == 'booked';
+            final occupied = booked || reserved;
             final b = (s['booking'] as Map?)?.cast<String, dynamic>();
             return Padding(
               padding: const EdgeInsets.only(bottom: 6),
@@ -392,32 +394,46 @@ class _VenueDashboardScreenState extends State<VenueDashboardScreen> {
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                       decoration: BoxDecoration(
-                        color: booked ? PFColors.primary.withValues(alpha: 0.14) : PFColors.surfaceRaised,
+                        color: occupied
+                            ? (reserved
+                                ? PFColors.warning.withValues(alpha: 0.14)
+                                : PFColors.primary.withValues(alpha: 0.14))
+                            : PFColors.surfaceRaised,
                         borderRadius: BorderRadius.circular(PFRadius.md),
                         border: Border.all(
-                            color: booked ? PFColors.primary : PFColors.border),
+                            color: occupied
+                                ? (reserved ? PFColors.warning : PFColors.primary)
+                                : PFColors.border),
                       ),
                       child: Row(
                         children: [
-                          Icon(booked ? PFIcons.booking : PFIcons.add,
+                          Icon(
+                              occupied
+                                  ? (reserved
+                                      ? Icons.schedule_rounded
+                                      : PFIcons.booking)
+                                  : PFIcons.add,
                               size: 15,
-                              color: booked ? PFColors.primary : PFColors.textTertiary),
+                              color: occupied
+                                  ? (reserved ? PFColors.warning : PFColors.primary)
+                                  : PFColors.textTertiary),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              booked
-                                  ? '${b?['match_title'] ?? b?['booked_by'] ?? 'Booked'}'
+                              occupied
+                                  ? '${b?['match_title'] ?? b?['booked_by'] ?? (reserved ? 'Reserved' : 'Booked')}'
                                   : 'Free',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
                                 fontSize: 12.5,
-                                fontWeight: booked ? FontWeight.w700 : FontWeight.w500,
-                                color: booked ? PFColors.text : PFColors.textTertiary,
+                                fontWeight:
+                                    occupied ? FontWeight.w700 : FontWeight.w500,
+                                color: occupied ? PFColors.text : PFColors.textTertiary,
                               ),
                             ),
                           ),
-                          if (booked)
+                          if (occupied)
                             PFBadge(
                               label: (b?['status'] ?? '').toString().toUpperCase(),
                               color: b?['status'] == 'confirmed'

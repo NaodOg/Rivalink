@@ -3,7 +3,7 @@ from django.contrib.auth.models import User
 from datetime import datetime, timedelta, time
 from .models import (
     UserProfile, TeamMember, MatchParticipant, VenueBooking, TournamentMatch,
-    UserSportRating, TeamRanking, Follow, League, LeagueMember, LeagueFixture,
+    UserSportRating, TeamRanking, Follow, LeagueMember, LeagueFixture,
 )
 from .glicko2 import display_rating, update_rating
 from .monetization import (
@@ -16,7 +16,7 @@ from .serializers import (
 
 
 
-# ── Shared helpers ──
+# â”€â”€ Shared helpers â”€â”€
 
 def _user_payload(user):
     phone = ''
@@ -312,7 +312,7 @@ def _apply_team_rankings(match, result, sport):
     l_rank.save()
 
 
-# ── League fixtures & standings ──────────────────────────────────────────
+# â”€â”€ League fixtures & standings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _league_delta(member, team_score, opp_score, league, sign):
     if team_score > opp_score:
@@ -388,7 +388,7 @@ def _check_league_complete(league):
         owner = member.team.owner
         if owner.id != league.organizer_id:
             notify(owner, 'general', 'League complete',
-                   f'"{league.name}" finished — final place: {index}.')
+                   f'"{league.name}" finished â€” final place: {index}.')
 
 
 def _scores_for_result(result, fixture):
@@ -579,7 +579,7 @@ def _get_quick_available_slots(venue, target_date, max_slots=4, active_bookings=
         active_bookings = VenueBooking.objects.filter(
             venue=venue,
             date=target_date,
-            status__in=['pending', 'confirmed']
+            status__in=['pending', 'reserved', 'confirmed']
         ).values('start_time', 'end_time')
 
     blocked = [
@@ -615,7 +615,7 @@ def _get_quick_available_slots(venue, target_date, max_slots=4, active_bookings=
     return slots
 
 
-# ── Trust & safety ──
+# â”€â”€ Trust & safety â”€â”€
 
 
 
@@ -632,3 +632,4 @@ def _user_card(u, request_user=None):
         'is_following': Follow.objects.filter(
             follower=request_user, following=u).exists() if request_user else False,
     }
+

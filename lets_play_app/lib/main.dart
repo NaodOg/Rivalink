@@ -11,6 +11,7 @@ import 'ui/screens/add_field_screen.dart';
 import 'ui/screens/chat_screen.dart';
 import 'ui/screens/field_details_screen.dart';
 import 'ui/screens/host_match_screen.dart';
+import 'ui/screens/host_earnings_screen.dart';
 import 'ui/screens/create_league_screen.dart';
 import 'ui/screens/league_details_screen.dart';
 import 'ui/screens/match_details_screen.dart';
@@ -18,6 +19,7 @@ import 'ui/screens/my_bookings_screen.dart';
 import 'ui/screens/notifications_screen.dart';
 import 'ui/screens/onboarding_screen.dart';
 import 'ui/screens/payments_screen.dart';
+import 'ui/screens/credits_screen.dart';
 import 'ui/screens/settings_screen.dart';
 import 'ui/screens/edit_profile_screen.dart';
 import 'ui/screens/shell_screen.dart';
@@ -141,7 +143,23 @@ class _RivalinkAppState extends State<RivalinkApp> {
           title: map['title'] as String,
         ));
       case AppRoutes.payments:
-        return MaterialPageRoute(settings: settings, builder: (_) => const PaymentsScreen());
+        final token = _session.token;
+        if (token == null) {
+          return MaterialPageRoute(settings: settings, builder: (_) => AuthScreen(session: _session));
+        }
+        return MaterialPageRoute(settings: settings, builder: (_) => PaymentsScreen(token: token));
+      case AppRoutes.hostEarnings:
+        final token = _session.token;
+        if (token == null) {
+          return MaterialPageRoute(settings: settings, builder: (_) => AuthScreen(session: _session));
+        }
+        return MaterialPageRoute(settings: settings, builder: (_) => HostEarningsScreen(token: token));
+      case AppRoutes.credits:
+        final token = _session.token;
+        if (token == null) {
+          return MaterialPageRoute(settings: settings, builder: (_) => AuthScreen(session: _session));
+        }
+        return MaterialPageRoute(settings: settings, builder: (_) => CreditsScreen(token: token));
       case AppRoutes.settings:
         return MaterialPageRoute(settings: settings, builder: (_) => SettingsScreen(session: _session));
       case AppRoutes.subscription:

@@ -55,6 +55,24 @@ def _settle_successful_payment(request, payment, tx_ref):
             match_id=payment.reference_id, user=payment.user).first()
         if participant:
             hold(participant, amount=payment.amount)
+            if participant.user_id == participant.match.organizer_id and \
+                    participant.match.venue_id and \
+                    participant.match.booking_status != 'confirmed':
+                from .reservations import reserve_for_match
+                from .escrow import refund_participant
+                try:
+                    reserve_for_match(participant.match)
+                except ValueError:
+                    refund_participant(
+                        participant, percent=100,
+                        reason='Venue slot was taken before payment settled')
+                    from .push import notify
+                    notify(
+                        participant.user, 'general', 'Venue slot unavailable',
+                        f'The slot for "{participant.match.title}" was taken. '
+                        'Your share was refunded. Pick another time.',
+                        match=participant.match,
+                    )
         log_event(request, 'payment_webhook', payment.user, 'ok',
                   f'match share held tx={tx_ref}')
         return

@@ -8,7 +8,7 @@ from .views_matches import (
     get_match_chat, send_match_chat, edit_match,
     match_ratings, match_result, get_match_recommendations,
     confirm_match_result, mark_match_payments, pay_match_share,
-    request_venue_booking, confirm_venue_booking,
+    request_venue_booking, confirm_venue_booking, withdraw_match,
 )
 from .views_teams import (
     create_team, get_my_teams, get_teams_seeking_players, join_team, leave_team,
@@ -47,6 +47,10 @@ from .payment_views import (
     initialize_premium_payment, initialize_venue_booking_payment, payment_webhook,
     payment_status, get_my_payments
 )
+from .payout_views import (
+    host_earnings, host_payouts, cancel_host_payout, review_host_payout,
+)
+from .credit_views import player_credits
 from .revenue_views import revenue_summary, my_transactions
 from .analytics_views import ingest_analytics, analytics_report
 from .engagement_views import engagement
@@ -111,7 +115,9 @@ urlpatterns = [
     path('matches/<int:match_id>/payments/', mark_match_payments, name='mark_match_payments'),
     path('matches/<int:match_id>/pay/', pay_match_share, name='pay_match_share'),
     path('matches/<int:match_id>/booking-request/', request_venue_booking, name='request_venue_booking'),
-    path('matches/<int:match_id>/booking-confirm/', confirm_venue_booking, name='confirm_venue_booking'),
+    path('matches/<int:match_id>/booking-confirm/', confirm_venue_booking, 
+         name='confirm_venue_booking'),
+    path('matches/<int:match_id>/withdraw/', withdraw_match, name='withdraw_match'),
     path('users/<int:user_id>/ratings/', user_ratings, name='user_ratings'),
     path('users/<int:user_id>/stats/', get_user_stats, name='get_user_stats'),
     path('favorites/<str:favorite_type>/<int:object_id>/', manage_favorites, name='manage_favorites'),
@@ -181,6 +187,14 @@ urlpatterns = [
     path('payments/webhook/', payment_webhook, name='payment_webhook'),
     path('payments/status/', payment_status, name='payment_status'),
     path('payments/history/', get_my_payments, name='get_my_payments'),
+    # Host payable ledger + payouts
+    path('host/earnings/', host_earnings, name='host_earnings'),
+    path('host/payouts/', host_payouts, name='host_payouts'),
+    path('host/payouts/<int:payout_id>/cancel/', cancel_host_payout,
+         name='cancel_host_payout'),
+    path('host/payouts/<int:payout_id>/review/', review_host_payout,
+         name='review_host_payout'),
+    path('credits/', player_credits, name='player_credits'),
     # Revenue / monetization
     path('revenue/summary/', revenue_summary, name='revenue_summary'),
     path('revenue/me/', my_transactions, name='my_transactions'),

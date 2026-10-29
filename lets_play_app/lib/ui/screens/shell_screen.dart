@@ -1889,6 +1889,12 @@ class _ProfileTabState extends State<_ProfileTab> {
                   tint: PFColors.success,
                   onTap: () => Navigator.pushNamed(context, AppRoutes.myVenues)),
               _MenuTile(
+                  icon: Icons.account_balance_wallet_rounded,
+                  label: 'Host earnings',
+                  tint: PFColors.success,
+                  onTap: () =>
+                      Navigator.pushNamed(context, AppRoutes.hostEarnings)),
+              _MenuTile(
                   icon: PFIcons.referee,
                   label: 'Referees',
                   tint: PFColors.success,
@@ -1917,6 +1923,11 @@ class _ProfileTabState extends State<_ProfileTab> {
                   label: 'Payments',
                   tint: PFColors.textSecondary,
                   onTap: () => Navigator.pushNamed(context, AppRoutes.payments)),
+              _MenuTile(
+                  icon: Icons.savings_outlined,
+                  label: 'Credits',
+                  tint: PFColors.textSecondary,
+                  onTap: () => Navigator.pushNamed(context, AppRoutes.credits)),
               _MenuTile(
                   icon: PFIcons.gear,
                   label: 'Settings',

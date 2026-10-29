@@ -369,9 +369,9 @@ def build_report(days=30):
 
 def _business_metrics(start, end, active_users, total_users):
     """Operational + money metrics used by the operating plan and ads media kit."""
-    from datetime import date, timedelta
+    from datetime import timedelta
 
-    from django.db.models import Avg, Q
+    from django.db.models import Q
 
     matches_created = Match.objects.filter(created_at__gte=start)
     results_confirmed = MatchResult.objects.filter(status='confirmed', confirmed_at__gte=start)

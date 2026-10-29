@@ -135,7 +135,6 @@ def _reason_chips(match, features, organizer_rel):
 
 def recommend_matches(user, limit=10, surface='recommendations', log=True):
     """Rank upcoming matches with reasons, exploration and optional learning."""
-    profile = UserProfile.objects.filter(user=user).first()
     limit = max(1, int(limit))
     now = timezone.now()
 
@@ -623,7 +622,7 @@ def post_match_rematch(hours=48, respect_windows=False):
                     variant,
                     f'"{result.match.title}" is in the books. '
                     'Host a rematch or find your next game.',
-                    f'That was a good one. Gather the squad for a rematch this week.',
+                    'That was a good one. Gather the squad for a rematch this week.',
                 )
             if notify_once(
                 user, title, message,

@@ -131,12 +131,91 @@ Rivalink is a full-stack sports matchmaking platform built with **Flutter** (mob
 
 - `PlatformTransaction` ledger — `kind`, `amount`, `currency`, `payer`, `reference`, `status`, `note`
 - Venues are booked in **2-hour slots** (minimum 2 hours — nobody books a single hour)
-- **Venue booking → 10% commission** recorded on every booking
+- **Venue booking → 10% commission** recorded on every direct booking
+- **Match field booking → flat Br 250 service fee** (only when booked)
 - **Host fee Br 20** recorded on every hosted match (Premium hosts exempt)
 - **Referee booking → 10% commission**
 - **Tournament registration → 12% entry cut**
 - **Premium Br 100/mo** recorded on a successful Chapa webhook
+- **Match-share escrow** held per player; booked matches pay the venue from the pot
+- **Venue payable** — the venue owner’s payee balance is credited with the field price
+- **Match pot and withdrawals** — after booking, a player can withdraw; the spot stays funded
+- **Player credit** — leftover pot surplus is split equally as in-app credit
+- **Host payouts** — payees request withdrawals; staff mark them paid with a reference
 - Endpoints: `GET /api/revenue/summary/` (staff only), `GET /api/revenue/me/`
+
+### Host earnings & payouts
+
+`HostAccount` is the payee account. A booked match credits the **venue owner** with
+a `venue_release` entry. Hosts get a `match_release` entry only for matches that
+do not use a venue pot (the legacy flow).
+
+- **Payees** open **Profile → Host earnings** (`/host-earnings` in the app) to see
+  available, pending and paid-out balances, the signed ledger, and payout history.
+- A payout request moves money from **available → pending**. Minimum Br 100; one
+  request in progress at a time. Payees can cancel a request before review.
+- **Staff** review payouts in Django admin or via
+  `POST /api/host/payouts/<id>/review/` with `action=paid` plus the bank/Telebirr
+  `reference`, or `action=rejected` (funds return to available).
+- **Paid** means the transfer left Rivalink and the reference is recorded. Actual
+  bank/Telebirr movement is still done manually by staff.
+- Late host cancellations claw back released money, which can leave the balance
+  negative until future releases cover it.
+
+Endpoints:
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/host/earnings/` | Balances, ledger, payouts |
+| GET/POST | `/api/host/payouts/` | List payouts / request one |
+| POST | `/api/host/payouts/<id>/cancel/` | Payee cancels a requested payout |
+| POST | `/api/host/payouts/<id>/review/` | Staff marks paid or rejected |
+
+### Match pot, withdrawals and player credit
+
+A match with a venue uses a pooled pot instead of paying the host.
+
+1. The host is a player too and pays one share. Paying reserves the venue slot
+   (the calendar shows **Reserved**, not Booked).
+2. Other players join and pay the same share.
+3. The target is **field price + Br 250 Rivalink service fee** (the fee is shown
+   as a separate line and is only earned when booking succeeds).
+4. The host can request booking once **every active player has paid**, the
+   **minimum player count** is met, and **collected ≥ target**.
+5. Every player must confirm before the field is booked.
+6. When booked: the venue owner is credited the field price, the Br 250 service
+   fee is recorded as collected, and any surplus stays in the match pot.
+
+After booking:
+
+- **No refunds.** A player who can’t make it uses **Withdraw from match**.
+- The withdrawn share opens a **funded spot**. The next player joins free.
+- If the host withdraws, organizer passes to another active player; the match
+  stays booked.
+- At kickoff, any remaining pot surplus is split equally as **player credit**.
+  If there is no surplus, no credit is created. The 36-hour deadline auto-cancels
+  under-filled, unbooked matches and refunds everyone.
+- Before booking, a player who leaves gets a full refund. A host who cancels
+  before booking loses **20% of his own share**; everyone else is refunded.
+
+Player credit is tracked in the `PlayerCreditAccount` ledger and shown in
+**Profile → Credits** (`GET /api/credits/`). Credit is applied automatically
+when paying a match share: partial credit reduces the Chapa amount, and full
+credit skips checkout entirely. If the share is later refunded before booking,
+the credit portion returns to the credit balance.
+
+Stale unpaid venue reservations are released after one hour by the lifecycle
+job, and under-filled/unfunded matches are cancelled at the 36-hour deadline.
+
+Match endpoints:
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/matches/<id>/pay/` | Pay your match share |
+| POST | `/api/matches/<id>/booking-request/` | Host requests field booking |
+| POST | `/api/matches/<id>/booking-confirm/` | Player confirms booking |
+| POST | `/api/matches/<id>/withdraw/` | Withdraw after booking |
+| GET | `/api/credits/` | Credit balance + history |
 
 ### Worked projection — 5,000 monthly users
 
@@ -384,12 +463,13 @@ Brand sponsorships are the **real revenue multiplier** — one branded league ca
 ## What's Missing
 
 ### 🔴 High Priority
-- **Premium subscription system** (payment integration, dynamic checks, upsell UI)
+- **Stable production `SITE_URL` + separate Chapa webhook secret** (the dev tunnel is not reliable)
+- **Automated venue/referee payouts** (payables and staff-reviewed payouts exist; bank/Telebirr transfer is manual)
 
 ### 🟡 Medium Priority
 - **Dispute resolution** (conflict process, refunds)
 - **Advertising system** (banners, sponsored content)
-- **Venue owner dashboard** (manage listings, view booking stats)
+- **Credit applied to venue bookings** (currently applied to match shares only)
 
 ### 🟢 Low Priority
 - **Corporate event management**
@@ -654,6 +734,12 @@ adb install -r build/app/outputs/flutter-apk/app-debug.apk
 | `RecommendationExposure` | A ranked match that was shown to a user |
 | `ModelArtifact` | Trained model weights + readiness metadata |
 | `NotificationBandit` | Thompson-sampling posterior per notification arm |
+| `HostAccount` | Payee available/pending/paid-out balances |
+| `HostLedgerEntry` | Signed payee ledger (match/venue releases, payouts, clawbacks) |
+| `HostPayout` | Withdrawal request with status + transfer reference |
+| `MatchPot` | Collected pot, venue payment, service fee, held surplus |
+| `MatchWithdrawal` | Post-booking withdrawal + funded replacement slot |
+| `PlayerCreditAccount` / `PlayerCreditEntry` | In-app credit from match surplus |
 
 ---
 

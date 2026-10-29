@@ -1,4 +1,5 @@
 import uuid
+from decimal import Decimal
 
 import requests as http_requests
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
@@ -14,21 +15,28 @@ from datetime import datetime, timedelta
 from .models import (
     UserProfile, Team, TeamMember, Match, MatchParticipant, MatchWaitlist, Notification,
     ChatMessage, PlayerRating, MatchResult, MatchResultConfirmation, Payment,
-    Venue, VenueBooking, Favorite,
+    Venue, VenueBooking, Favorite, MatchPot,
 )
 from .push import notify
 from .entitlements import (
     can_host_match,
 )
 from .monetization import (
-    host_fee_for, record_transaction, money, venue_commission,
-    BOOKING_SLOT_HOURS, CANCEL_FULL_REFUND_HOURS,
+    host_fee_for, record_transaction, money,
+    BOOKING_SLOT_HOURS, CANCEL_FULL_REFUND_HOURS, FIELD_SERVICE_FEE_ETB,
     HOST_CANCEL_STRIKE_LIMIT, HOST_SUSPENSION_DAYS,
 )
 from .escrow import (
     hold, release_match_funds, refund_percent_for,
     refund_participant, forfeit_no_shows, escrow_summary,
     all_players_confirmed, cancel_and_settle, venue_cancellation_fee,
+)
+from .payouts import credit_host
+from .credits import account_for, credit_player, debit_player
+from .reservations import reserve_for_match, release_reservation
+from .match_pot import (
+    active_participants, can_withdraw, claim_funded_spot, funding_summary,
+    open_withdrawals, withdraw_participant,
 )
 from .serializers import (
     err_msg as _err_msg, display_name, match_summary, match_my, match_history,
@@ -248,6 +256,17 @@ def leave_match(request):
             if not participant:
                 return Response({'error': 'You are not in this match'}, status=status.HTTP_400_BAD_REQUEST)
 
+            if match.booking_status == 'confirmed':
+                return Response({
+                    'error': 'The field is already booked — cancel is not available. '
+                             'Use withdraw to give up your spot; no refund is issued.',
+                    'code': 'use_withdraw',
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            if participant.withdrawn_at is not None:
+                return Response({'error': 'You already withdrew from this match'},
+                                status=status.HTTP_400_BAD_REQUEST)
+
             # Refund the share per the cancellation window before removing them.
             refund_pct = refund_percent_for(match)
             refunded_amount = money(0)
@@ -325,8 +344,33 @@ def cancel_match(request):
         if not match.is_active:
             return Response({'error': 'Match is already cancelled'}, status=status.HTTP_400_BAD_REQUEST)
 
+        if match.booking_status == 'confirmed':
+            return Response({
+                'error': 'The field is already booked. Withdraw from the match instead; '
+                         'the match can stay booked with the remaining players.',
+                'code': 'use_withdraw',
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         hours_to_kickoff = (match.date_time - timezone.now()).total_seconds() / 3600
         late = hours_to_kickoff < CANCEL_FULL_REFUND_HOURS
+
+        # Host cancels before the field is booked: keep 20% of the host's share.
+        host_fee_kept = money(0)
+        host_participant = MatchParticipant.objects.filter(
+            match=match, user=request.user).first()
+        if host_participant and host_participant.payment_status == 'held':
+            host_share = money(host_participant.amount_paid or match.price)
+            host_fee_kept = money(host_share * Decimal('0.20'))
+            refund_participant(
+                host_participant, percent=80,
+                reason='Host cancelled the match (20% fee)')
+            if host_fee_kept > 0:
+                record_transaction(
+                    'cancellation_fee', host_fee_kept, payer=request.user,
+                    reference_type='match', reference_id=match.id,
+                    status='collected',
+                    note='Host cancellation fee (20% of host share)',
+                )
 
         # Cancel the venue booking (if any) and work out the venue's fee.
         venue_fee = money(0)
@@ -365,6 +409,7 @@ def cancel_match(request):
         return Response({
             'message': 'Match cancelled — players refunded',
             'refunded': str(settlement['refunded']),
+            'host_fee_kept': str(host_fee_kept),
             'venue_fee': str(venue_fee),
             'host_penalty': str(settlement['penalty']),
             'host_strikes': profile.host_cancel_count,
@@ -379,6 +424,31 @@ def cancel_match(request):
 
 # ── Feature 2: Leave Team ──
 
+
+
+@api_view(['POST'])
+def withdraw_match(request, match_id):
+    """Give up a spot after the field is booked. No refund; the spot stays funded."""
+    if not request.user.is_authenticated:
+        return Response({'error': 'Authentication required'},
+                        status=status.HTTP_401_UNAUTHORIZED)
+    match = Match.objects.filter(id=match_id).first()
+    if match is None:
+        return Response({'error': 'Match not found'}, status=status.HTTP_404_NOT_FOUND)
+    try:
+        result = withdraw_participant(match, request.user)
+    except ValueError as exc:
+        return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    track(request.user, 'match_withdrew', {
+        'match_id': match.id, 'share': result['share_amount'],
+    })
+    return Response({
+        'success': True,
+        'message': 'You withdrew. Your share stays in the pot to fund a replacement.',
+        'funding': funding_summary(match),
+        **result,
+    })
 
 
 @api_view(['GET'])
@@ -725,7 +795,25 @@ def join_match(request):
             if match.date_time <= timezone.now():
                 return Response({'error': 'This match has already started'},
                                 status=status.HTTP_400_BAD_REQUEST)
-            
+
+            if match.booking_status == 'confirmed':
+                try:
+                    funded = claim_funded_spot(match, request.user)
+                except ValueError as exc:
+                    return Response(
+                        {'error': str(exc), 'funded_spot': True},
+                        status=status.HTTP_400_BAD_REQUEST)
+                track(request.user, 'match_joined', {
+                    'match_id': match.id, 'sport': match.sport, 'price': 0,
+                    'funded': True,
+                })
+                return Response({
+                    'message': 'Joined a funded spot — no payment needed',
+                    'funded': True,
+                    'match': {'id': match.id, 'title': match.title},
+                    **funded,
+                }, status=status.HTTP_200_OK)
+
             # Check if already a participant
             if MatchParticipant.objects.filter(match=match, user=request.user).exists():
                 return Response(
@@ -815,12 +903,13 @@ def get_match_details(request, match_id):
             match=match
         ).select_related('user', 'user__profile')
 
+        participant = None
         is_participant = False
         is_organizer = False
         if request.user and request.user.is_authenticated:
-            is_participant = MatchParticipant.objects.filter(
-                match=match, user=request.user
-            ).exists()
+            participant = MatchParticipant.objects.filter(
+                match=match, user=request.user).first()
+            is_participant = participant is not None
             is_organizer = match.organizer.id == request.user.id
 
         participants_data = []
@@ -836,6 +925,7 @@ def get_match_details(request, match_id):
                 'name': display_name(p.user),
                 'joined_at': p.joined_at.isoformat(),
                 'is_organizer': p.user.id == match.organizer.id,
+                'withdrawn': p.withdrawn_at is not None,
             }
             if is_organizer or p.user.id == request.user.id:
                 participant_info['email'] = p.user.email
@@ -844,6 +934,11 @@ def get_match_details(request, match_id):
             participants_data.append(participant_info)
 
         organizer_name = display_name(match.organizer)
+        funded_spots = open_withdrawals(match).count()
+        has_withdrawn = bool(participant and participant.withdrawn_at)
+        can_withdraw_flag = bool(
+            participant and request.user.is_authenticated
+            and can_withdraw(match, request.user))
 
         return Response({
             'match': {
@@ -866,6 +961,18 @@ def get_match_details(request, match_id):
                 'venue_address': match.venue.address if match.venue else None,
                 'venue_city': match.venue.city if match.venue else None,
                 'booking_status': match.booking_status,
+                'is_booked': match.booking_status == 'confirmed',
+                'has_withdrawn': has_withdrawn,
+                'can_withdraw': can_withdraw_flag,
+                'open_funded_spots': funded_spots,
+                'can_join_funded': (
+                    match.booking_status == 'confirmed' and funded_spots > 0
+                    and participant is None and match.is_active
+                    and match.date_time > timezone.now()
+                ),
+                'my_payment_status': participant.payment_status if participant else None,
+                'my_booking_confirmed': participant.booking_confirmed if participant else False,
+                'funding': funding_summary(match),
                 'is_organizer': is_organizer,
                 'is_participant': is_participant,
                 'escrow': escrow_summary(match) if is_organizer else None,
@@ -1251,6 +1358,13 @@ def mark_match_payments(request, match_id):
             Q(user_id__in=gateway_paid_ids) | Q(payment_status__in=locked_statuses)
         ).update(paid=True, paid_at=now, amount_paid=match.price, payment_status='held')
 
+    if match.organizer_id in paid_ids and match.venue and \
+            match.booking_status != 'confirmed':
+        try:
+            reserve_for_match(match)
+        except ValueError:
+            pass
+
     paid_count = MatchParticipant.objects.filter(match=match, paid=True).count()
     total = len(participant_ids)
     return Response({
@@ -1283,19 +1397,70 @@ def pay_match_share(request, match_id):
                          'payment_status': participant.payment_status})
 
     if match.price <= 0:
-        return Response({'success': False, 'message': 'This match is free — no payment needed'},
+        return Response({'success': False, 'message': 'This match is free - no payment needed'},
                         status=status.HTTP_400_BAD_REQUEST)
+
+    price = money(match.price)
+    credit_used = money(participant.credit_applied or 0)
+    if credit_used > price:
+        credit_used = price
+        participant.credit_applied = price
+        participant.save(update_fields=['credit_applied'])
+
+    if credit_used == 0:
+        account = account_for(request.user)
+        candidate = money(min(account.balance, price))
+        if candidate > 0:
+            try:
+                debit_player(
+                    request.user, candidate, 'used', match=match,
+                    note=f'Credit applied to "{match.title}"',
+                )
+                participant.credit_applied = candidate
+                participant.save(update_fields=['credit_applied'])
+                credit_used = candidate
+            except ValueError:
+                credit_used = money(0)
+
+    amount_due = money(price - credit_used)
+
+    def _return_credit():
+        if credit_used > 0:
+            credit_player(
+                request.user, credit_used, 'adjustment', match=match,
+                note='Credit returned — payment was not started',
+            )
+            participant.credit_applied = money(0)
+            participant.save(update_fields=['credit_applied'])
+
+    if request.user.id == match.organizer_id and match.venue and \
+            match.booking_status != 'confirmed':
+        try:
+            reserve_for_match(match)
+        except ValueError as exc:
+            _return_credit()
+            return Response({'error': str(exc)}, status=status.HTTP_409_CONFLICT)
+
+    if amount_due <= 0:
+        hold(participant)
+        return Response({
+            'success': True,
+            'paid_with_credit': True,
+            'credit_used': str(credit_used),
+            'amount_due': '0.00',
+            'payment_status': participant.payment_status,
+        })
 
     tx_ref = f"RIVALINK-M{match.id}U{request.user.id}-{uuid.uuid4().hex[:8].upper()}"
     payment = Payment.objects.create(
         user=request.user,
         tx_ref=tx_ref,
-        amount=match.price,
+        amount=amount_due,
         currency='ETB',
         payment_type='match_share',
         reference_type='match',
         reference_id=match.id,
-        description=f'Share for "{match.title}"',
+        description=f'Share for "{match.title}" (credit Br {credit_used})',
     )
 
     chapa_secret = getattr(settings, 'CHAPA_SECRET_KEY', '')
@@ -1306,14 +1471,19 @@ def pay_match_share(request, match_id):
             payment.save(update_fields=['status'])
             hold(participant)
             return Response({'success': True, 'mock': True, 'tx_ref': tx_ref,
+                             'credit_used': str(credit_used),
+                             'amount_due': str(amount_due),
                              'payment_status': participant.payment_status})
         payment.status = 'failed'
         payment.save(update_fields=['status'])
+        _return_credit()
+        if request.user.id == match.organizer_id:
+            release_reservation(match)
         return Response({'success': False, 'message': 'Payment system not configured'},
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     payload = {
-        'amount': str(match.price),
+        'amount': str(amount_due),
         'currency': 'ETB',
         'email': request.user.email,
         'tx_ref': tx_ref,
@@ -1337,14 +1507,22 @@ def pay_match_share(request, match_id):
             payment.save(update_fields=['chapa_tx_id'])
             return Response({'success': True,
                              'checkout_url': data.get('data', {}).get('checkout_url', ''),
+                             'credit_used': str(credit_used),
+                             'amount_due': str(amount_due),
                              'tx_ref': tx_ref})
         payment.status = 'failed'
         payment.save(update_fields=['status'])
+        _return_credit()
+        if request.user.id == match.organizer_id:
+            release_reservation(match)
         return Response({'success': False, 'message': data.get('message', 'Payment initialization failed')},
                         status=status.HTTP_400_BAD_REQUEST)
     except http_requests.RequestException:
         payment.status = 'failed'
         payment.save(update_fields=['status'])
+        _return_credit()
+        if request.user.id == match.organizer_id:
+            release_reservation(match)
         return Response({'success': False, 'message': 'Payment service unavailable. Try again.'},
                         status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
@@ -1352,11 +1530,27 @@ def pay_match_share(request, match_id):
 # ── Field booking: host requests, every player confirms, then it's booked ──
 
 def _book_field_for_match(match):
-    """Book the venue for this match and release the escrow to pay it."""
+    """Book the venue from the match pot; hold any surplus for withdrawals."""
+    if MatchPot.objects.filter(match=match).exists():
+        return {
+            'booking_id': (VenueBooking.objects.filter(match=match).first() or VenueBooking()).id,
+            'venue': match.venue.name if match.venue else '',
+            'already_booked': True,
+            **funding_summary(match),
+        }
+
+    try:
+        reserve_for_match(match)
+    except ValueError as exc:
+        raise ValueError(str(exc))
+
     venue = match.venue
+    if venue is None:
+        raise ValueError('Attach a venue to this match first')
+
     local_dt = timezone.localtime(match.date_time)
     end_dt = local_dt + timedelta(hours=BOOKING_SLOT_HOURS)
-    total_price = money(venue.slot_price)
+    slot_price = money(venue.slot_price)
 
     booking = VenueBooking.objects.filter(match=match).first()
     if booking is None:
@@ -1364,19 +1558,51 @@ def _book_field_for_match(match):
             match=match, venue=venue, booked_by=match.organizer,
             date=local_dt.date(), start_time=local_dt.time().replace(second=0, microsecond=0),
             end_time=end_dt.time().replace(second=0, microsecond=0),
-            hours=BOOKING_SLOT_HOURS, total_price=total_price,
+            hours=BOOKING_SLOT_HOURS, total_price=slot_price,
         )
+    booking.total_price = money(booking.total_price or slot_price)
     booking.status = 'confirmed'
+    booking.payment_status = 'paid'
+    booking.paid_at = timezone.now()
     booking.save()
 
-    released = release_match_funds(match)
+    participants = list(active_participants(match))
+    collected = money(sum((p.amount_paid or 0) for p in participants))
+    fee = money(FIELD_SERVICE_FEE_ETB) if booking.total_price > 0 else money(0)
+    target = money(booking.total_price + fee)
+    if collected < target:
+        shortfall = money(target - collected)
+        raise ValueError(
+            f'The pot is short by Br {shortfall}. '
+            f'Br {target} is needed before the field can be booked.'
+        )
 
-    commission = venue_commission(booking.total_price)
-    record_transaction(
-        'venue_commission', commission, payer=match.organizer,
-        reference_type='venue_booking', reference_id=booking.id,
-        note=f'Commission on {venue.name} (match #{match.id})',
+    MatchParticipant.objects.filter(
+        match=match, withdrawn_at__isnull=True, payment_status='held',
+    ).update(payment_status='released')
+
+    pot = MatchPot.objects.create(
+        match=match,
+        collected=collected,
+        venue_amount=booking.total_price,
+        platform_fee=fee,
+        surplus=money(collected - target),
+        status='booked',
     )
+
+    credit_host(
+        venue.owner, booking.total_price, 'venue_release', match=match,
+        note=f'Venue payment for "{match.title}" ({venue.name})',
+    )
+    if fee > 0:
+        record_transaction(
+            'field_service_fee', fee, payer=match.organizer,
+            reference_type='match', reference_id=match.id, status='collected',
+            note=f'Field booking service fee for "{match.title}"',
+        )
+
+    booking.venue.total_bookings += 1
+    booking.venue.save(update_fields=['total_bookings'])
 
     match.booking_status = 'confirmed'
     match.booking_confirmed_at = timezone.now()
@@ -1385,12 +1611,18 @@ def _book_field_for_match(match):
     for p in MatchParticipant.objects.filter(match=match).select_related('user'):
         notify(p.user, 'booking_confirmed', 'Field booked',
                f'{venue.name} is booked for "{match.title}". See you there!', match=match)
+    notify(
+        venue.owner, 'general', 'Venue payment received',
+        f'Br {booking.total_price} was added to your earnings for "{match.title}".',
+    )
 
     return {
         'booking_id': booking.id,
         'venue': venue.name,
         'slot_price': str(booking.total_price),
-        'released': str(released),
+        'pot': funding_summary(match),
+        'surplus_held': str(pot.surplus),
+        'venue_payable': str(booking.total_price),
     }
 
 
@@ -1414,18 +1646,31 @@ def request_venue_booking(request, match_id):
     if match.booking_status == 'confirmed':
         return Response({'error': 'The field is already booked'}, status=status.HTTP_400_BAD_REQUEST)
 
-    participants = MatchParticipant.objects.filter(match=match)
-    unpaid = participants.exclude(user_id=match.organizer_id).filter(payment_status='unpaid').count()
+    participants = MatchParticipant.objects.filter(match=match, withdrawn_at__isnull=True)
+    unpaid = participants.filter(payment_status='unpaid').count()
     if unpaid:
         return Response({
             'error': f'{unpaid} player(s) have not paid their share yet. '
-                     'Everyone must pay before the field is booked.',
+                     'Everyone, including the host, must pay before the field is booked.',
         }, status=status.HTTP_400_BAD_REQUEST)
 
-    if participants.count() < max(1, match.min_players):
+    active_count = participants.count()
+    if active_count < max(1, match.min_players):
         return Response({
             'error': f'Need at least {match.min_players} players before booking '
-                     f'(currently {participants.count()}).',
+                     f'(currently {active_count}).',
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    collected = money(sum((p.amount_paid or 0) for p in participants))
+    fee = money(FIELD_SERVICE_FEE_ETB) if match.venue.slot_price > 0 else money(0)
+    target = money(match.venue.slot_price + fee)
+    if collected < target:
+        return Response({
+            'error': f'Br {target} is needed to book {match.venue.name}. '
+                     f'Only Br {collected} has been collected — '
+                     f'Br {money(target - collected)} short.',
+            'funding': funding_summary(match),
+            'upgrade_required': False,
         }, status=status.HTTP_400_BAD_REQUEST)
 
     match.booking_status = 'requested'
@@ -1437,16 +1682,17 @@ def request_venue_booking(request, match_id):
         notify(
             p.user, 'booking_request', 'Confirm the field booking',
             f'"{match.title}" is about to book {match.venue.name}. '
-            f'Confirm to lock it in — your Br {match.price} becomes non-refundable '
-            f'once the field is booked.',
+            f'Confirm to lock it in — after booking your Br {p.amount_paid or match.price} '
+            'is non-refundable unless the host or venue cancels.',
             match=match,
         )
 
     return Response({
         'success': True,
         'booking_status': 'requested',
-        'players': participants.count(),
+        'players': active_count,
         'confirmed': 0,
+        'funding': funding_summary(match),
         'note': 'Every player must confirm before the field is booked.',
     })
 
@@ -1459,9 +1705,10 @@ def confirm_venue_booking(request, match_id):
     except Match.DoesNotExist:
         return Response({'error': 'Match not found'}, status=status.HTTP_404_NOT_FOUND)
 
-    participant = MatchParticipant.objects.filter(match=match, user=request.user).first()
+    participant = MatchParticipant.objects.filter(
+        match=match, user=request.user, withdrawn_at__isnull=True).first()
     if not participant:
-        return Response({'error': 'Only joined players can confirm'},
+        return Response({'error': 'Only active joined players can confirm'},
                         status=status.HTTP_403_FORBIDDEN)
 
     if match.booking_status == 'confirmed':
@@ -1476,9 +1723,12 @@ def confirm_venue_booking(request, match_id):
     participant.save(update_fields=['booking_confirmed', 'booking_confirmed_at'])
 
     if not all_players_confirmed(match):
-        total = MatchParticipant.objects.filter(match=match).exclude(user_id=match.organizer_id).count()
+        total = MatchParticipant.objects.filter(
+            match=match, withdrawn_at__isnull=True).exclude(
+            user_id=match.organizer_id).count()
         confirmed = MatchParticipant.objects.filter(
-            match=match, booking_confirmed=True).exclude(user_id=match.organizer_id).count()
+            match=match, booking_confirmed=True, withdrawn_at__isnull=True).exclude(
+            user_id=match.organizer_id).count()
         return Response({
             'success': True,
             'booking_status': 'requested',
@@ -1487,7 +1737,10 @@ def confirm_venue_booking(request, match_id):
             'message': f'Confirmed {confirmed}/{total} — waiting for the rest',
         })
 
-    booked = _book_field_for_match(match)
+    try:
+        booked = _book_field_for_match(match)
+    except ValueError as exc:
+        return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
     return Response({'success': True, 'booking_status': 'confirmed',
                      'message': 'Everyone confirmed — field booked!', **booked})
 

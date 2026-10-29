@@ -189,6 +189,7 @@ class MatchParticipant(models.Model):
         ('refunded', 'Refunded'),
         ('partially_refunded', 'Partially refunded'),
         ('forfeited', 'Forfeited'),
+        ('covered', 'Covered by a withdrawal'),
     ]
 
     match = models.ForeignKey(Match, on_delete=models.CASCADE, related_name='participants')
@@ -197,9 +198,11 @@ class MatchParticipant(models.Model):
     paid = models.BooleanField(default=False)
     paid_at = models.DateTimeField(null=True, blank=True)
     amount_paid = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    credit_applied = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     payment_status = models.CharField(max_length=20, choices=PAYMENT_STATUS_CHOICES, default='unpaid')
     booking_confirmed = models.BooleanField(default=False)
     booking_confirmed_at = models.DateTimeField(null=True, blank=True)
+    withdrawn_at = models.DateTimeField(null=True, blank=True)
     joined_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -629,6 +632,7 @@ class Venue(models.Model):
 class VenueBooking(models.Model):
     STATUS_CHOICES = [
         ('pending', 'Pending'),
+        ('reserved', 'Reserved by a match'),
         ('confirmed', 'Confirmed'),
         ('completed', 'Completed'),
         ('cancelled', 'Cancelled'),
@@ -874,6 +878,7 @@ class PlatformTransaction(models.Model):
         ('premium', 'Premium Subscription'),
         ('featured_listing', 'Featured Listing'),
         ('match_share', 'Match Share Escrow'),
+        ('field_service_fee', 'Field Booking Service Fee'),
         ('cancellation_fee', 'Cancellation Fee'),
         ('host_penalty', 'Host Penalty (owed)'),
     ]
@@ -1069,4 +1074,200 @@ class NotificationBandit(models.Model):
 
     def __str__(self):
         return f'{self.user.username} {self.experiment}:{self.arm} ({self.alpha}/{self.beta})'
+
+
+class HostAccount(models.Model):
+    """Running payable balance for a match host.
+
+    Money is collected by the gateway into the platform account; this account
+    tracks how much of that money the host is entitled to withdraw.
+    """
+
+    user = models.OneToOneField(User, on_delete=models.CASCADE,
+                                related_name='host_account')
+    available_balance = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    pending_balance = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    paid_out_total = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return (f'{self.user.username}: available {self.available_balance}, '
+                f'pending {self.pending_balance}')
+
+
+class HostLedgerEntry(models.Model):
+    """Signed host ledger: earnings in, payout requests out, reversals back in."""
+
+    KIND_CHOICES = [
+        ('match_release', 'Match share released'),
+        ('no_show_forfeit', 'No-show forfeited'),
+        ('venue_release', 'Venue booking paid'),
+        ('payout_request', 'Payout requested'),
+        ('payout_rejected', 'Payout returned'),
+        ('payout_cancelled', 'Payout cancelled'),
+        ('cancellation_clawback', 'Cancellation clawback'),
+        ('adjustment', 'Adjustment'),
+    ]
+
+    account = models.ForeignKey(HostAccount, on_delete=models.CASCADE,
+                                related_name='entries')
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    kind = models.CharField(max_length=32, choices=KIND_CHOICES)
+    match = models.ForeignKey(Match, on_delete=models.SET_NULL, null=True, blank=True,
+                              related_name='host_ledger_entries')
+    payout = models.ForeignKey('HostPayout', on_delete=models.SET_NULL, null=True, blank=True,
+                               related_name='ledger_entries')
+    note = models.CharField(max_length=300, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['account', 'created_at']),
+            models.Index(fields=['kind']),
+        ]
+
+    def __str__(self):
+        return f'{self.account.user.username} {self.kind} {self.amount}'
+
+
+class HostPayout(models.Model):
+    STATUS_CHOICES = [
+        ('requested', 'Requested'),
+        ('processing', 'Processing'),
+        ('paid', 'Paid'),
+        ('rejected', 'Rejected'),
+        ('cancelled', 'Cancelled'),
+    ]
+    METHOD_CHOICES = [
+        ('bank', 'Bank transfer'),
+        ('telebirr', 'Telebirr'),
+        ('other', 'Other'),
+    ]
+
+    account = models.ForeignKey(HostAccount, on_delete=models.CASCADE,
+                                related_name='payouts')
+    user = models.ForeignKey(User, on_delete=models.CASCADE,
+                             related_name='host_payouts')
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='requested')
+    method = models.CharField(max_length=20, choices=METHOD_CHOICES, default='bank')
+    destination = models.CharField(max_length=200, blank=True, default='')
+    reference = models.CharField(max_length=200, blank=True, default='')
+    note = models.TextField(blank=True, default='')
+    admin_note = models.TextField(blank=True, default='')
+    requested_at = models.DateTimeField(auto_now_add=True)
+    processed_at = models.DateTimeField(null=True, blank=True)
+    processed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True,
+                                     related_name='processed_host_payouts')
+
+    class Meta:
+        ordering = ['-requested_at']
+        indexes = [
+            models.Index(fields=['status', 'requested_at']),
+            models.Index(fields=['user', 'requested_at']),
+        ]
+
+    def __str__(self):
+        return f'{self.user.username} payout {self.amount} ({self.status})'
+
+
+class MatchPot(models.Model):
+    """The money collected for a booked match.
+
+    The venue is paid from the pot, the platform fee is earned, and any surplus
+    is held until kickoff so it can fund replacements or become player credit.
+    """
+
+    STATUS_CHOICES = [
+        ('booked', 'Booked'),
+        ('settled', 'Settled'),
+        ('cancelled', 'Cancelled'),
+    ]
+
+    match = models.OneToOneField(Match, on_delete=models.CASCADE, related_name='pot')
+    collected = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    venue_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    platform_fee = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    surplus = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='booked')
+    settled_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f'Pot for {self.match.title}: {self.collected} ({self.status})'
+
+
+class MatchWithdrawal(models.Model):
+    """A paid player leaving after the field is booked.
+
+    Their spot stays funded: the next player joins free. If nobody takes it,
+    the pot surplus is split as credit at settlement.
+    """
+
+    STATUS_CHOICES = [
+        ('open', 'Open'),
+        ('replaced', 'Replaced'),
+        ('closed', 'Closed'),
+    ]
+
+    match = models.ForeignKey(Match, on_delete=models.CASCADE, related_name='withdrawals')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='match_withdrawals')
+    share_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
+    replacement_user = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='funded_match_spots')
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        unique_together = ('match', 'user')
+        ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['match', 'status']),
+        ]
+
+    def __str__(self):
+        return f'{self.user.username} withdrew from {self.match_id} ({self.status})'
+
+
+class PlayerCreditAccount(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE,
+                                related_name='credit_account')
+    balance = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f'{self.user.username}: credit {self.balance}'
+
+
+class PlayerCreditEntry(models.Model):
+    KIND_CHOICES = [
+        ('match_surplus', 'Match surplus'),
+        ('withdrawal_credit', 'Withdrawal credit'),
+        ('used', 'Used on a booking'),
+        ('adjustment', 'Adjustment'),
+    ]
+
+    account = models.ForeignKey(PlayerCreditAccount, on_delete=models.CASCADE,
+                                related_name='entries')
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    kind = models.CharField(max_length=32, choices=KIND_CHOICES)
+    match = models.ForeignKey(Match, on_delete=models.SET_NULL, null=True, blank=True,
+                              related_name='credit_entries')
+    note = models.CharField(max_length=300, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['account', 'created_at']),
+        ]
+
+    def __str__(self):
+        return f'{self.account.user.username} {self.kind} {self.amount}'
+
+
 

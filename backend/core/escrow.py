@@ -14,16 +14,12 @@ from datetime import datetime
 
 import requests as http_requests
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 
-from .models import MatchParticipant, Payment
-from .monetization import (
-    CANCEL_FULL_REFUND_HOURS,
-    CANCEL_PARTIAL_REFUND_HOURS,
-    CANCEL_PARTIAL_REFUND_PERCENT,
-    money,
-    record_transaction,
-)
+from .models import MatchParticipant, MatchPot, Payment
+from .monetization import money, record_transaction
+from .payouts import credit_host, debit_host
 
 CHAPA_REFUND_URL = "https://api.chapa.co/v1/refund"
 
@@ -31,12 +27,13 @@ CHAPA_REFUND_URL = "https://api.chapa.co/v1/refund"
 # ── Policy ───────────────────────────────────────────────────────────────
 
 def refund_percent_for(match):
-    """Percent refunded when a player leaves *now* (100 / 50 / 0)."""
-    hours = (match.date_time - timezone.now()).total_seconds() / 3600
-    if hours >= CANCEL_FULL_REFUND_HOURS:
+    """Percent refunded when a player leaves *now*.
+
+    Before the field is booked, players get a full refund. After booking they
+    cannot leave for a refund; they must use the withdraw flow.
+    """
+    if match.booking_status != 'confirmed':
         return 100
-    if hours >= CANCEL_PARTIAL_REFUND_HOURS:
-        return CANCEL_PARTIAL_REFUND_PERCENT
     return 0
 
 
@@ -44,17 +41,22 @@ def refund_percent_for(match):
 
 def hold(participant, amount=None):
     """Mark a participant's share as held in escrow (on payment success)."""
-    value = money(amount if amount is not None else participant.match.price)
+    credit = money(participant.credit_applied or 0)
+    total = money(participant.match.price if amount is None else money(amount) + credit)
     participant.payment_status = 'held'
     participant.paid = True
     participant.paid_at = timezone.now()
-    participant.amount_paid = value
+    participant.amount_paid = total
     participant.save(update_fields=['payment_status', 'paid', 'paid_at', 'amount_paid'])
     return participant
 
 
+@transaction.atomic
 def release_match_funds(match):
-    """Release every held share to the host (called when the result confirms)."""
+    """Release every held share for matches without a venue pot (legacy flow)."""
+    if MatchPot.objects.filter(match=match).exists():
+        # The pot already paid the venue/fee and is holding any surplus.
+        return money(0)
     held = list(MatchParticipant.objects.filter(match=match, payment_status='held'))
     total = money(sum((p.amount_paid or 0) for p in held))
     if held:
@@ -65,6 +67,10 @@ def release_match_funds(match):
             'match_share', total, payer=match.organizer,
             reference_type='match', reference_id=match.id, status='collected',
             note=f'Escrow released to host for "{match.title}"',
+        )
+        credit_host(
+            match.organizer, total, 'match_release', match=match,
+            note=f'Escrow released for "{match.title}"',
         )
     return total
 
@@ -82,8 +88,18 @@ def refund_participant(participant, percent=100, reason=''):
         participant.payment_status = 'refunded'
     else:
         participant.payment_status = 'partially_refunded'
-    participant.save(update_fields=['payment_status'])
 
+    credit_applied = money(participant.credit_applied or 0)
+    credit_refund = money(credit_applied * Decimal(percent) / Decimal(100))
+    participant.credit_applied = money(credit_applied - credit_refund)
+    participant.save(update_fields=['payment_status', 'credit_applied'])
+
+    if credit_refund > 0:
+        from .credits import credit_player
+        credit_player(
+            participant.user, credit_refund, 'adjustment', match=participant.match,
+            note='Credit returned from a match',
+        )
     if refund > 0:
         _refund_via_gateway(participant, refund, reason)
     return refund
@@ -97,13 +113,54 @@ def refund_match_funds(match, reason='', percent=100):
     return total
 
 
+@transaction.atomic
 def forfeit_no_shows(match, user_ids):
-    """No-shows lose their share — it stays with the host."""
+    """No-shows lose their share; it goes to the pot (or host for legacy matches)."""
     if not user_ids:
-        return 0
+        return money(0)
     qs = MatchParticipant.objects.filter(match=match, user_id__in=user_ids, payment_status='held')
     total = money(sum((p.amount_paid or 0) for p in qs))
     qs.update(payment_status='forfeited')
+    if total <= 0:
+        return total
+
+    pot = MatchPot.objects.select_for_update().filter(match=match).first()
+    if pot is None:
+        credit_host(
+            match.organizer, total, 'no_show_forfeit', match=match,
+            note=f'No-show forfeit for "{match.title}"',
+        )
+        return total
+
+    if pot.status == 'booked':
+        pot.surplus = money(pot.surplus + total)
+        pot.save(update_fields=['surplus'])
+        return total
+
+    if pot.status == 'settled':
+        from .credits import credit_player
+        from .match_pot import active_participants
+        participants = list(active_participants(match))
+        if participants:
+            per_player = money(total / len(participants))
+            allocated = money(0)
+            for index, participant in enumerate(participants):
+                share = per_player
+                if index == len(participants) - 1:
+                    share = money(total - allocated)
+                if share > 0:
+                    credit_player(
+                        participant.user, share, 'match_surplus', match=match,
+                        note=f'No-show forfeit from "{match.title}"',
+                    )
+                    allocated = money(allocated + share)
+            return total
+
+    # Cancelled pot or no active players: legacy host credit.
+    credit_host(
+        match.organizer, total, 'no_show_forfeit', match=match,
+        note=f'No-show forfeit for "{match.title}"',
+    )
     return total
 
 
@@ -126,11 +183,12 @@ def escrow_summary(match):
 # ── Field-booking flow ───────────────────────────────────────────────────
 
 def all_players_confirmed(match):
-    """True when every joined player (other than the host) has confirmed."""
-    qs = MatchParticipant.objects.filter(match=match).exclude(user_id=match.organizer_id)
+    """True when every active joined player (other than the host) has confirmed."""
+    qs = MatchParticipant.objects.filter(
+        match=match, withdrawn_at__isnull=True).exclude(user_id=match.organizer_id)
     total = qs.count()
     if total == 0:
-        return True  # solo match — the host's request is the confirmation
+        return True  # host-only match — the host's request is the confirmation
     return qs.filter(booking_confirmed=True).count() == total
 
 
@@ -149,6 +207,7 @@ def venue_cancellation_fee(booking):
     return money(Decimal(booking.total_price) * Decimal(percent) / Decimal(100))
 
 
+@transaction.atomic
 def cancel_and_settle(match, reason='', venue_fee=None):
     """Cancel a match: refund every player, charge the host for the damage.
 
@@ -169,6 +228,11 @@ def cancel_and_settle(match, reason='', venue_fee=None):
             fronted += amount
 
     penalty = money(fronted + money(venue_fee or 0))
+    if fronted > 0:
+        debit_host(
+            match.organizer, fronted, 'cancellation_clawback', match=match,
+            note=f'Platform fronted refunds after cancelling "{match.title}"',
+        )
     if penalty > 0:
         record_transaction(
             'host_penalty', penalty, payer=match.organizer,

@@ -501,6 +501,7 @@ class _BookingSheetState extends State<_BookingSheet> {
                     itemBuilder: (_, i) {
                       final s = _slots[i];
                       final free = s['status'] == 'free';
+                      final reserved = s['status'] == 'reserved';
                       final selected = _selectedIndex == i;
                       return GestureDetector(
                         onTap: free
@@ -539,13 +540,17 @@ class _BookingSheetState extends State<_BookingSheet> {
                                           ? PFColors.textSecondary
                                           : PFColors.textTertiary)),
                               const SizedBox(height: 6),
-                              Text(free ? 'Available' : 'Booked',
+                              Text(free
+                                  ? 'Available'
+                                  : (reserved ? 'Reserved' : 'Booked'),
                                   style: TextStyle(
                                       fontSize: 10,
                                       fontWeight: FontWeight.w700,
                                       color: free
                                           ? PFColors.success
-                                          : PFColors.danger)),
+                                          : (reserved
+                                              ? PFColors.warning
+                                              : PFColors.danger))),
                             ],
                           ),
                         ),

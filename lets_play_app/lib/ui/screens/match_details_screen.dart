@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/data/services/analytics_service.dart';
 import 'package:flutter/services.dart';
@@ -86,6 +87,117 @@ class _MatchDetailsScreenState extends State<MatchDetailsScreen> {
   bool get _isOrganizer {
     final userId = widget.session.user?['id'];
     return _match?['organizer'] == userId || _match?['organizer_id'] == userId;
+  }
+
+  bool get _isParticipant => _match?['is_participant'] == true;
+  bool get _isBooked => _match?['is_booked'] == true;
+  bool get _hasWithdrawn => _match?['has_withdrawn'] == true;
+  bool get _canWithdraw => _match?['can_withdraw'] == true;
+  bool get _canJoinFunded => _match?['can_join_funded'] == true;
+  bool get _hasVenue => _match?['venue_id'] != null;
+  String get _bookingStatus => _match?['booking_status']?.toString() ?? 'none';
+  String? get _myPaymentStatus => _match?['my_payment_status']?.toString();
+  bool get _myBookingConfirmed => _match?['my_booking_confirmed'] == true;
+  Map<String, dynamic> get _funding =>
+      (_match?['funding'] as Map?)?.cast<String, dynamic>() ?? const {};
+  double get _price =>
+      double.tryParse(_match?['price']?.toString() ?? '0') ?? 0;
+
+  Future<void> _payShare() async {
+    final token = widget.session.token;
+    if (token == null) return;
+    AnalyticsService.event('match_share_pay_clicked', {
+      'match_id': widget.matchId,
+      'price': _price,
+    });
+    final result = await widget.repo.payMatchShare(token, widget.matchId);
+    if (!mounted) return;
+    final checkout = result['checkout_url']?.toString() ?? '';
+    final creditUsed =
+        double.tryParse(result['credit_used']?.toString() ?? '0') ?? 0;
+    if (checkout.isNotEmpty) {
+      final url = Uri.parse(checkout);
+      if (await canLaunchUrl(url)) {
+        await launchUrl(url, mode: LaunchMode.externalApplication);
+      }
+    }
+    if (!mounted) return;
+    final creditNote =
+        creditUsed > 0 ? ' Br ${creditUsed.toStringAsFixed(2)} credit applied.' : '';
+    final message = result['success'] == true
+        ? (checkout.isNotEmpty
+            ? 'Complete the payment in your browser, then refresh.$creditNote'
+            : 'Share paid — your spot is secured.$creditNote')
+        : (result['message'] ?? result['error'] ?? 'Payment failed').toString();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    _load();
+  }
+
+  Future<void> _withdraw() async {
+    final token = widget.session.token;
+    if (token == null) return;
+    final isHost = _isOrganizer;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: PFColors.surfaceRaised,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(PFRadius.lg)),
+        title: Text(isHost ? 'Withdraw and hand over?' : 'Withdraw from match?'),
+        content: Text(
+          isHost
+              ? 'You will lose your share and the match will stay booked. '
+                  'Another player takes over as organizer.'
+              : 'You will lose your share — there is no refund after booking. '
+                  'Your spot stays funded so another player can join free.',
+          style: const TextStyle(color: PFColors.textSecondary),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Stay')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Withdraw',
+                  style: TextStyle(color: PFColors.danger))),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    final result = await widget.repo.withdrawMatch(token, widget.matchId);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(result['success'] == true
+            ? 'You withdrew — your spot is funded for a replacement.'
+            : (result['error'] ?? 'Could not withdraw').toString())));
+    if (result['success'] == true) _load();
+  }
+
+  Future<void> _requestBooking() async {
+    final token = widget.session.token;
+    if (token == null) return;
+    final result =
+        await widget.repo.requestVenueBooking(token, widget.matchId);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(result['success'] == true
+            ? 'Booking requested — every player must confirm.'
+            : (result['error'] ?? 'Could not request booking').toString())));
+    if (result['success'] == true) _load();
+  }
+
+  Future<void> _confirmBooking() async {
+    final token = widget.session.token;
+    if (token == null) return;
+    final result =
+        await widget.repo.confirmVenueBooking(token, widget.matchId);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(result['success'] == true
+            ? (result['message'] ?? 'Booking confirmed').toString()
+            : (result['error'] ?? 'Could not confirm').toString())));
+    if (result['success'] == true) _load();
   }
 
   bool get _isTeamSport {
@@ -566,6 +678,14 @@ class _MatchDetailsScreenState extends State<MatchDetailsScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _stats(),
+              if (_hasVenue) ...[
+                const SizedBox(height: PFSpacing.lg),
+                _bookingCard(),
+              ],
+              if (_canWithdraw) ...[
+                const SizedBox(height: PFSpacing.lg),
+                _withdrawCard(),
+              ],
               if (_description.isNotEmpty) ...[
                 const SizedBox(height: PFSpacing.lg),
                 _descriptionCard(),
@@ -781,6 +901,7 @@ class _MatchDetailsScreenState extends State<MatchDetailsScreen> {
     final name = (p['name'] ?? 'Player').toString();
     final isHost = p['is_organizer'] == true;
     final isMe = p['id'] == widget.session.user?['id'];
+    final withdrawn = p['withdrawn'] == true;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
@@ -792,6 +913,10 @@ class _MatchDetailsScreenState extends State<MatchDetailsScreen> {
                 style: Theme.of(context).textTheme.titleSmall,
                 overflow: TextOverflow.ellipsis),
           ),
+          if (withdrawn) ...[
+            const PFBadge(label: 'WITHDREW', color: PFColors.danger),
+            const SizedBox(width: 6),
+          ],
           if (isMe) ...[
             const PFBadge(label: 'YOU', color: PFColors.secondary),
             const SizedBox(width: 6),
@@ -802,10 +927,223 @@ class _MatchDetailsScreenState extends State<MatchDetailsScreen> {
     );
   }
 
+  Widget _bookingCard() {
+    final target = double.tryParse(_funding['target']?.toString() ?? '0') ?? 0;
+    final collected =
+        double.tryParse(_funding['collected']?.toString() ?? '0') ?? 0;
+    final fee = double.tryParse(_funding['service_fee']?.toString() ?? '0') ?? 0;
+    final openSpots = (_funding['open_funded_spots'] ?? 0) as int;
+    final status = _bookingStatus;
+    final (label, color) = switch (status) {
+      'confirmed' => ('BOOKED', PFColors.success),
+      'requested' => ('AWAITING CONFIRMATION', PFColors.warning),
+      'cancelled' => ('CANCELLED', PFColors.danger),
+      _ => ('COLLECTING', PFColors.primary),
+    };
+    final progress = target > 0 ? (collected / target).clamp(0.0, 1.0) : 1.0;
+    final canRequest = _isOrganizer && status != 'confirmed' && status != 'requested';
+    final canConfirm = !_isOrganizer &&
+        _isParticipant &&
+        status == 'requested' &&
+        !_myBookingConfirmed &&
+        !_hasWithdrawn;
+
+    return PFCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.stadium_outlined,
+                  size: 18, color: PFColors.primary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text('Field booking',
+                    style: Theme.of(context).textTheme.titleSmall),
+              ),
+              PFBadge(label: label, color: color),
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (target > 0) ...[
+            ClipRRect(
+              borderRadius: BorderRadius.circular(PFRadius.pill),
+              child: LinearProgressIndicator(
+                value: progress,
+                minHeight: 7,
+                backgroundColor: PFColors.surfaceHigh,
+                valueColor:
+                    AlwaysStoppedAnimation<Color>(status == 'confirmed'
+                        ? PFColors.success
+                        : PFColors.primary),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Br ${collected.toStringAsFixed(0)} of '
+              'Br ${target.toStringAsFixed(0)} collected'
+              '${_funding['open_funded_spots'] != null && openSpots > 0 ? ' · $openSpots funded spot${openSpots == 1 ? '' : 's'} open' : ''}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+          const SizedBox(height: 6),
+          Text(
+            fee > 0
+                ? 'Field Br ${_funding['venue_amount'] ?? '0'} + '
+                    'Rivalink fee Br ${fee.toStringAsFixed(0)}'
+                : 'Free field — no service fee',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          if (status == 'confirmed')
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                'The venue is paid. Any surplus is held until kickoff to fund withdrawals.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+          if (canRequest) ...[
+            const SizedBox(height: PFSpacing.md),
+            PFButton(
+              label: 'Request field booking',
+              variant: PFButtonVariant.secondary,
+              dense: true,
+              icon: Icons.event_available_outlined,
+              onTap: _requestBooking,
+            ),
+          ],
+          if (status == 'requested' && _isOrganizer)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                'Waiting for every player to confirm before booking.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+          if (canConfirm) ...[
+            const SizedBox(height: PFSpacing.md),
+            PFButton(
+              label: 'Confirm booking',
+              dense: true,
+              icon: Icons.check_circle_outline_rounded,
+              onTap: _confirmBooking,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'After booking your share is non-refundable unless the host or venue cancels.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _withdrawCard() {
+    return PFCard(
+      color: PFColors.warning.withValues(alpha: 0.06),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.exit_to_app_rounded,
+                  size: 18, color: PFColors.warning),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  _isOrganizer ? 'Hand over the match' : "Can't make it?",
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            _isOrganizer
+                ? 'Withdrawing forfeits your share. Another player becomes organizer and the match stays booked.'
+                : 'Withdrawing forfeits your share — no refund after booking. '
+                    'Your spot stays funded so a replacement can join free.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: PFSpacing.md),
+          PFButton(
+            label: _isOrganizer
+                ? 'Withdraw and hand over'
+                : 'Withdraw from match',
+            variant: PFButtonVariant.secondary,
+            dense: true,
+            onTap: _withdraw,
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _bottomBar() {
-    final price = double.tryParse(_match?['price']?.toString() ?? '0') ?? 0;
-    final priceText = price == 0 ? 'Free' : 'Br ${price.toStringAsFixed(0)}';
+    final priceText = _price == 0 ? 'Free' : 'Br ${_price.toStringAsFixed(0)}';
     final isFull = _spots <= 0;
+    final paidIn = const ['held', 'released', 'covered']
+        .contains(_myPaymentStatus);
+    final canPay = _isParticipant &&
+        !_isBooked &&
+        !_hasWithdrawn &&
+        !paidIn &&
+        _price > 0;
+    final fundedSpots = (_funding['open_funded_spots'] ?? 0) as int;
+
+    Widget action;
+    if (canPay) {
+      action = PFButton(
+        label: 'Pay my share',
+        icon: Icons.lock_outline_rounded,
+        onTap: _payShare,
+      );
+    } else if (_isBooked) {
+      if (_isOrganizer) {
+        action = PFButton(
+          label: 'Submit result',
+          icon: Icons.emoji_events_outlined,
+          onTap: _showSubmitResultSheet,
+        );
+      } else if (_isParticipant) {
+        action = PFButton(
+          label: _hasWithdrawn ? 'Withdrawn' : 'You are in',
+          onTap: null,
+        );
+      } else if (_canJoinFunded) {
+        action = PFButton(
+          label: 'Join free (funded spot)',
+          icon: Icons.card_giftcard_rounded,
+          onTap: _join,
+        );
+      } else {
+        action = PFButton(label: 'Field booked', onTap: null);
+      }
+    } else if (_isOrganizer) {
+      action = PFButton(
+        label: 'Submit result',
+        icon: Icons.emoji_events_outlined,
+        onTap: _showSubmitResultSheet,
+      );
+    } else if (_isParticipant) {
+      action = PFButton(label: 'You are in', onTap: null);
+    } else {
+      action = PFButton(
+        label: isFull ? 'Waitlist' : 'Join match',
+        icon: isFull ? null : Icons.add_rounded,
+        onTap: isFull ? null : _join,
+      );
+    }
+
+    final subtitle = _isBooked
+        ? (fundedSpots > 0
+            ? '$fundedSpots funded spot${fundedSpots == 1 ? '' : 's'} available'
+            : 'Field booked · no refunds after booking')
+        : (isFull
+            ? 'No spots available'
+            : '$_spots spot${_spots == 1 ? '' : 's'} left');
+
     return Container(
       decoration: const BoxDecoration(
         color: PFColors.surface,
@@ -825,28 +1163,12 @@ class _MatchDetailsScreenState extends State<MatchDetailsScreen> {
                       style: PFType.number.copyWith(
                           fontSize: 20, color: PFColors.primary)),
                   const SizedBox(height: 2),
-                  Text(
-                    isFull
-                        ? 'No spots available'
-                        : '$_spots spot${_spots == 1 ? '' : 's'} left',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
+                  Text(subtitle,
+                      style: Theme.of(context).textTheme.bodySmall),
                 ],
               ),
               const SizedBox(width: PFSpacing.lg),
-              Expanded(
-                child: _isOrganizer
-                    ? PFButton(
-                        label: 'Submit result',
-                        icon: Icons.emoji_events_outlined,
-                        onTap: _showSubmitResultSheet,
-                      )
-                    : PFButton(
-                        label: isFull ? 'Waitlist' : 'Join match',
-                        icon: isFull ? null : Icons.add_rounded,
-                        onTap: isFull ? null : _join,
-                      ),
-              ),
+              Expanded(child: action),
             ],
           ),
         ),

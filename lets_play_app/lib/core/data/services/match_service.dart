@@ -226,10 +226,97 @@ class MatchService {
       if (response.statusCode == 200) {
         CacheService.invalidateMatches();
         CacheService.invalidateRecommendations();
-        return {'success': true, 'message': data['message']};
+        return {'success': true, ...data};
       } else {
         return {'success': false, 'error': data['error'] ?? 'Failed to join match'};
       }
+    } catch (e) {
+      return {'success': false, 'error': 'Connection error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> payMatchShare({
+    required String token,
+    required int matchId,
+    String returnUrl = '',
+  }) async {
+    try {
+      final headers = await _getHeaders(token);
+      final response = await http.post(
+        Uri.parse('$_baseUrl/matches/$matchId/pay/'),
+        headers: headers,
+        body: json.encode({'return_url': returnUrl}),
+      ).timeout(ApiConfig.httpTimeout);
+      final data = json.decode(response.body);
+      if (response.statusCode == 200) {
+        CacheService.invalidateMatches();
+        return {'success': true, ...data};
+      }
+      return {'success': false, 'message': data['message'] ?? data['error'] ?? 'Payment failed'};
+    } catch (e) {
+      return {'success': false, 'message': 'Connection error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> withdrawMatch({
+    required String token,
+    required int matchId,
+  }) async {
+    try {
+      final headers = await _getHeaders(token);
+      final response = await http.post(
+        Uri.parse('$_baseUrl/matches/$matchId/withdraw/'),
+        headers: headers,
+      ).timeout(ApiConfig.httpTimeout);
+      final data = json.decode(response.body);
+      if (response.statusCode == 200) {
+        CacheService.invalidateMatches();
+        CacheService.invalidateRecommendations();
+        return {'success': true, ...data};
+      }
+      return {'success': false, 'error': data['error'] ?? 'Could not withdraw'};
+    } catch (e) {
+      return {'success': false, 'error': 'Connection error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> requestVenueBooking({
+    required String token,
+    required int matchId,
+  }) async {
+    try {
+      final headers = await _getHeaders(token);
+      final response = await http.post(
+        Uri.parse('$_baseUrl/matches/$matchId/booking-request/'),
+        headers: headers,
+      ).timeout(ApiConfig.httpTimeout);
+      final data = json.decode(response.body);
+      if (response.statusCode == 200) {
+        CacheService.invalidateMatches();
+        return {'success': true, ...data};
+      }
+      return {'success': false, 'error': data['error'] ?? 'Could not request booking'};
+    } catch (e) {
+      return {'success': false, 'error': 'Connection error: $e'};
+    }
+  }
+
+  static Future<Map<String, dynamic>> confirmVenueBooking({
+    required String token,
+    required int matchId,
+  }) async {
+    try {
+      final headers = await _getHeaders(token);
+      final response = await http.post(
+        Uri.parse('$_baseUrl/matches/$matchId/booking-confirm/'),
+        headers: headers,
+      ).timeout(ApiConfig.httpTimeout);
+      final data = json.decode(response.body);
+      if (response.statusCode == 200) {
+        CacheService.invalidateMatches();
+        return {'success': true, ...data};
+      }
+      return {'success': false, 'error': data['error'] ?? 'Could not confirm booking'};
     } catch (e) {
       return {'success': false, 'error': 'Connection error: $e'};
     }

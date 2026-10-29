@@ -130,7 +130,7 @@ def list_venues(request):
         for b in VenueBooking.objects.filter(
             venue_id__in=queryset.values_list('id', flat=True),
             date=target_date,
-            status__in=['pending', 'confirmed'],
+            status__in=['pending', 'reserved', 'confirmed'],
         ).values('venue_id', 'start_time', 'end_time'):
             bookings_by_venue[b['venue_id']].append(b)
 
@@ -262,7 +262,7 @@ def _has_conflict(venue, date, start_time, end_time, exclude_booking_id=None):
     end = _parse_time(end_time)
 
     qs = VenueBooking.objects.filter(
-        venue=venue, date=date, status__in=['pending', 'confirmed'])
+        venue=venue, date=date, status__in=['pending', 'reserved', 'confirmed'])
     if exclude_booking_id:
         qs = qs.exclude(id=exclude_booking_id)
     for b in qs:
@@ -471,7 +471,7 @@ def update_venue_booking(request, booking_id):
 
         allowed_from = {
             'confirmed': ['pending'],
-            'cancelled': ['pending', 'confirmed'],
+            'cancelled': ['pending', 'reserved', 'confirmed'],
         }
         if booking.status not in allowed_from[new_status]:
             return Response({'error': f'Cannot change a {booking.status} booking to {new_status}'},
@@ -570,10 +570,10 @@ def rate_venue(request, venue_id):
         return Response({'error': _err_msg(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-# ── Tournament System ──
+# â”€â”€ Tournament System â”€â”€
 
 
-# ── Venue owner: schedule + revenue ──────────────────────────────────────
+# â”€â”€ Venue owner: schedule + revenue â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _schedule_for_day(venue, day, bookings):
     """Every 2-hour slot for a day, marked booked/free."""
@@ -594,7 +594,10 @@ def _schedule_for_day(venue, day, bookings):
         slots.append({
             'start': cursor.strftime('%H:%M'),
             'end': slot_end.strftime('%H:%M'),
-            'status': 'booked' if hit else 'free',
+            'status': (
+                'reserved' if hit and hit.status == 'reserved'
+                else ('booked' if hit else 'free')
+            ),
             'booking': {
                 'id': hit.id,
                 'status': hit.status,
@@ -638,7 +641,7 @@ def venue_schedule(request, venue_id):
 
     bookings = list(VenueBooking.objects.filter(
         venue=venue, date__gte=from_date, date__lte=to_date,
-        status__in=['pending', 'confirmed', 'completed'],
+        status__in=['pending', 'reserved', 'confirmed', 'completed'],
     ).select_related('booked_by', 'match'))
 
     days = []
@@ -646,7 +649,7 @@ def venue_schedule(request, venue_id):
     while day <= to_date:
         day_bookings = [b for b in bookings if b.date == day]
         slots = _schedule_for_day(venue, day, day_bookings)
-        booked = sum(1 for s in slots if s['status'] == 'booked')
+        booked = sum(1 for s in slots if s['status'] in ('booked', 'reserved'))
         days.append({
             'date': day.isoformat(),
             'weekday': day.strftime('%a'),
@@ -752,7 +755,7 @@ def venue_availability(request, venue_id):
 
         bookings = list(VenueBooking.objects.filter(
             venue=venue, date__gte=from_date, date__lte=to_date,
-            status__in=['pending', 'confirmed']))
+            status__in=['pending', 'reserved', 'confirmed']))
 
         days = []
         day = from_date
@@ -766,6 +769,7 @@ def venue_availability(request, venue_id):
                 'slots': slots,
                 'free': sum(1 for s in slots if s['status'] == 'free'),
                 'booked': sum(1 for s in slots if s['status'] == 'booked'),
+                'reserved': sum(1 for s in slots if s['status'] == 'reserved'),
             })
             day += timedelta(days=1)
 
@@ -779,7 +783,7 @@ def venue_availability(request, venue_id):
 
     target = parse_date(request.query_params.get('date'), today)
     bookings = list(VenueBooking.objects.filter(
-        venue=venue, date=target, status__in=['pending', 'confirmed']))
+        venue=venue, date=target, status__in=['pending', 'reserved', 'confirmed']))
     slots = [{'start': s['start'], 'end': s['end'], 'status': s['status']}
              for s in _schedule_for_day(venue, target, bookings)]
 
@@ -790,4 +794,6 @@ def venue_availability(request, venue_id):
         'slots': slots,
         'free': sum(1 for s in slots if s['status'] == 'free'),
         'booked': sum(1 for s in slots if s['status'] == 'booked'),
+        'reserved': sum(1 for s in slots if s['status'] == 'reserved'),
     })
+

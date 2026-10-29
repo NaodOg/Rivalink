@@ -10,10 +10,12 @@ from rest_framework.test import APITestCase
 
 from .entitlements import team_all_premium
 from .models import (
-    AnalyticsEvent, ChatMessage, DeviceToken, League, LeagueFixture, LeagueMember, Match,
-    MatchParticipant, MatchResult, ModelArtifact, Notification, NotificationBandit,
-    PlayerRating, PlatformTransaction, RecommendationExposure, Referee, RefereeBooking, Team,
-    TeamMember, Tournament, TournamentTeam, UserProfile, UserSportRating, Venue, VenueBooking,
+    AnalyticsEvent, ChatMessage, DeviceToken, HostPayout, League, LeagueFixture,
+    LeagueMember, Match, MatchParticipant, MatchPot, MatchResult, MatchWithdrawal,
+    ModelArtifact, Notification, NotificationBandit, Payment,
+    PlayerCreditAccount, PlayerRating, PlatformTransaction, RecommendationExposure,
+    Referee, RefereeBooking, Team, TeamMember, Tournament, TournamentTeam, UserProfile,
+    UserSportRating, Venue, VenueBooking,
 )
 
 
@@ -1032,4 +1034,449 @@ class PostMatchLoopTests(BaseAPITestCase):
         sent = weekly_recap(force=True)
         self.assertGreaterEqual(sent, 1)
         self.assertEqual(Notification.objects.filter(user=player).count(), 1)
+
+
+class HostPayoutTests(BaseAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.host = self.make_user('payouthost')
+        self.player = self.make_user('payoutplayer')
+        self.match = self.make_match(
+            self.host, title='Paid match', price=Decimal('250'))
+        self.participant = MatchParticipant.objects.create(
+            match=self.match, user=self.player)
+
+    def _hold(self):
+        from .escrow import hold
+        hold(self.participant, amount=Decimal('250'))
+        self.participant.refresh_from_db()
+        return self.participant
+
+    def test_release_credits_host_balance_once(self):
+        from .escrow import release_match_funds
+        from .payouts import account_for
+        self._hold()
+
+        self.assertEqual(release_match_funds(self.match), Decimal('250.00'))
+        self.assertEqual(release_match_funds(self.match), Decimal('0.00'))
+
+        account = account_for(self.host)
+        self.assertEqual(account.available_balance, Decimal('250.00'))
+        self.assertEqual(account.pending_balance, Decimal('0'))
+        entries = account.entries.filter(kind='match_release')
+        self.assertEqual(entries.count(), 1)
+        self.assertEqual(entries.first().amount, Decimal('250.00'))
+        self.assertEqual(entries.first().match_id, self.match.id)
+
+    def test_no_show_forfeit_credits_host(self):
+        from .escrow import forfeit_no_shows
+        from .payouts import account_for
+        self._hold()
+
+        total = forfeit_no_shows(self.match, [self.player.id])
+        self.assertEqual(total, Decimal('250.00'))
+        self.assertEqual(forfeit_no_shows(self.match, [self.player.id]), Decimal('0.00'))
+
+        account = account_for(self.host)
+        self.assertEqual(account.available_balance, Decimal('250.00'))
+        self.assertTrue(account.entries.filter(kind='no_show_forfeit').exists())
+
+    def test_payout_request_moves_available_to_pending(self):
+        from .payouts import account_for, credit_host, request_payout
+        credit_host(self.host, Decimal('500'), 'adjustment')
+
+        payout = request_payout(
+            self.host, Decimal('300'), method='telebirr',
+            destination='0911223344')
+        account = account_for(self.host)
+        self.assertEqual(account.available_balance, Decimal('200.00'))
+        self.assertEqual(account.pending_balance, Decimal('300.00'))
+        self.assertEqual(payout.status, 'requested')
+
+        with self.assertRaises(ValueError):
+            request_payout(self.host, Decimal('100'), method='bank',
+                           destination='1234567890')
+
+    def test_payout_minimum_and_available_checks(self):
+        from .payouts import credit_host, request_payout
+        with self.assertRaises(ValueError):
+            request_payout(self.host, Decimal('50'), method='bank',
+                           destination='1234567890')
+
+        credit_host(self.host, Decimal('150'), 'adjustment')
+        with self.assertRaises(ValueError):
+            request_payout(self.host, Decimal('500'), method='bank',
+                           destination='1234567890')
+
+    def test_mark_paid_and_reject_lifecycle(self):
+        from .payouts import (
+            account_for, credit_host, mark_payout_paid, reject_payout,
+            request_payout,
+        )
+        staff = self.make_user('payoutstaff')
+        staff.is_staff = True
+        staff.save()
+        credit_host(self.host, Decimal('500'), 'adjustment')
+
+        payout = request_payout(
+            self.host, Decimal('300'), method='telebirr',
+            destination='0911223344')
+        mark_payout_paid(payout, staff, reference='TELE-123')
+        account = account_for(self.host)
+        self.assertEqual(account.available_balance, Decimal('200.00'))
+        self.assertEqual(account.pending_balance, Decimal('0'))
+        self.assertEqual(account.paid_out_total, Decimal('300.00'))
+        payout.refresh_from_db()
+        self.assertEqual(payout.status, 'paid')
+        self.assertEqual(payout.reference, 'TELE-123')
+        self.assertEqual(payout.processed_by, staff)
+
+        payout2 = request_payout(
+            self.host, Decimal('200'), method='bank',
+            destination='1234567890')
+        reject_payout(payout2, staff, note='Wrong account')
+        account.refresh_from_db()
+        self.assertEqual(account.available_balance, Decimal('200.00'))
+        self.assertEqual(account.pending_balance, Decimal('0'))
+        payout2.refresh_from_db()
+        self.assertEqual(payout2.status, 'rejected')
+        self.assertTrue(account.entries.filter(kind='payout_rejected').exists())
+
+    def test_cancellation_claws_back_released_funds(self):
+        from .escrow import cancel_and_settle, release_match_funds
+        from .payouts import account_for
+        self._hold()
+        release_match_funds(self.match)
+        self.assertEqual(account_for(self.host).available_balance, Decimal('250.00'))
+
+        settlement = cancel_and_settle(self.match, reason='Host cancelled')
+        self.assertEqual(settlement['fronted'], Decimal('250.00'))
+        account = account_for(self.host)
+        self.assertEqual(account.available_balance, Decimal('0.00'))
+        self.assertTrue(account.entries.filter(kind='cancellation_clawback').exists())
+
+    def test_payout_api_and_permissions(self):
+        from .payouts import credit_host
+        credit_host(self.host, Decimal('500'), 'adjustment')
+
+        self.auth(self.host)
+        res = self.client.get('/api/host/earnings/')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data['account']['available'], '500.00')
+
+        res = self.client.post('/api/host/payouts/', {
+            'amount': '250', 'method': 'telebirr', 'destination': '0911223344',
+        }, format='json')
+        self.assertEqual(res.status_code, 201)
+        payout_id = res.data['payout']['id']
+        self.assertEqual(res.data['account']['pending'], '250.00')
+
+        payout = HostPayout.objects.get(id=payout_id)
+        staff = self.make_user('payoutreviewer')
+        staff.is_staff = True
+        staff.save()
+        self.auth(staff)
+        res = self.client.post(
+            f'/api/host/payouts/{payout_id}/review/',
+            {'action': 'paid', 'reference': 'BANK-999'}, format='json')
+        self.assertEqual(res.status_code, 200)
+        payout.refresh_from_db()
+        self.assertEqual(payout.status, 'paid')
+        self.assertEqual(payout.reference, 'BANK-999')
+
+        other = self.make_user('payoutother')
+        self.auth(other)
+        res = self.client.post(f'/api/host/payouts/{payout_id}/cancel/')
+        self.assertEqual(res.status_code, 404)
+
+    def test_non_staff_cannot_review_payout(self):
+        from .payouts import credit_host, request_payout
+        credit_host(self.host, Decimal('200'), 'adjustment')
+        payout = request_payout(
+            self.host, Decimal('200'), method='bank', destination='1234567890')
+        self.auth(self.host)
+        res = self.client.post(
+            f'/api/host/payouts/{payout.id}/review/',
+            {'action': 'paid', 'reference': 'NOPE'}, format='json')
+        self.assertIn(res.status_code, (401, 403))
+
+    def test_host_can_cancel_requested_payout(self):
+        from .payouts import account_for, credit_host, request_payout
+        credit_host(self.host, Decimal('500'), 'adjustment')
+        payout = request_payout(
+            self.host, Decimal('300'), method='bank', destination='1234567890')
+        self.auth(self.host)
+        res = self.client.post(f'/api/host/payouts/{payout.id}/cancel/')
+        self.assertEqual(res.status_code, 200)
+        account = account_for(self.host)
+        self.assertEqual(account.available_balance, Decimal('500.00'))
+        self.assertEqual(account.pending_balance, Decimal('0'))
+        payout.refresh_from_db()
+        self.assertEqual(payout.status, 'cancelled')
+
+
+class MatchPotWithdrawalTests(BaseAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.venue_owner = self.make_user('potvenueowner')
+        self.venue = Venue.objects.create(
+            owner=self.venue_owner, name='Pot Pitch', address='Road 2', city='Addis',
+            slot_price=Decimal('1000'), is_available=True)
+        self.host = self.make_user('pothost')
+        self.players = [self.make_user(f'potplayer{i}') for i in range(4)]
+        self.match = self.make_match(
+            self.host, title='Pot Match', price=Decimal('300'),
+            venue=self.venue, min_players=5, max_players=8,
+            date_time=timezone.now() + timedelta(days=2))
+        for player in self.players:
+            participant = MatchParticipant.objects.create(match=self.match, user=player)
+            participant.payment_status = 'held'
+            participant.paid = True
+            participant.amount_paid = Decimal('300')
+            participant.save()
+        host_participant = MatchParticipant.objects.get(
+            match=self.match, user=self.host)
+        host_participant.payment_status = 'held'
+        host_participant.paid = True
+        host_participant.amount_paid = Decimal('300')
+        host_participant.save()
+        self.match.current_players = 5
+        self.match.save(update_fields=['current_players'])
+
+    def _book(self):
+        from .views_matches import _book_field_for_match
+        return _book_field_for_match(self.match)
+
+    def test_booking_pays_venue_and_holds_surplus(self):
+        from .payouts import account_for
+        result = self._book()
+        self.match.refresh_from_db()
+        self.assertEqual(self.match.booking_status, 'confirmed')
+        pot = MatchPot.objects.get(match=self.match)
+        self.assertEqual(pot.collected, Decimal('1500.00'))
+        self.assertEqual(pot.venue_amount, Decimal('1000.00'))
+        self.assertEqual(pot.platform_fee, Decimal('250.00'))
+        self.assertEqual(pot.surplus, Decimal('250.00'))
+        self.assertEqual(result['surplus_held'], '250.00')
+        self.assertEqual(
+            account_for(self.venue_owner).available_balance, Decimal('1000.00'))
+        self.assertEqual(
+            account_for(self.host).available_balance, Decimal('0.00'))
+        self.assertTrue(PlatformTransaction.objects.filter(
+            kind='field_service_fee', amount=Decimal('250.00'),
+            status='collected').exists())
+
+    def test_booking_rejects_short_pot(self):
+        from .views_matches import _book_field_for_match
+        self.match.price = Decimal('200')
+        self.match.save(update_fields=['price'])
+        MatchParticipant.objects.filter(match=self.match).update(
+            amount_paid=Decimal('200'))
+        with self.assertRaises(ValueError):
+            _book_field_for_match(self.match)
+
+    def test_withdraw_opens_funded_spot_and_replacement_joins_free(self):
+        from .match_pot import claim_funded_spot, withdraw_participant
+        self._book()
+        result = withdraw_participant(self.match, self.players[0])
+        self.match.refresh_from_db()
+        self.assertEqual(result['funded_spots'], 1)
+        self.assertEqual(self.match.current_players, 4)
+        participant = MatchParticipant.objects.get(
+            match=self.match, user=self.players[0])
+        self.assertIsNotNone(participant.withdrawn_at)
+        self.assertEqual(participant.payment_status, 'forfeited')
+        withdrawal = MatchWithdrawal.objects.get(
+            match=self.match, user=self.players[0])
+        self.assertEqual(withdrawal.status, 'open')
+        self.assertEqual(withdrawal.share_amount, Decimal('300.00'))
+
+        newcomer = self.make_user('potnewcomer')
+        claim = claim_funded_spot(self.match, newcomer)
+        self.assertEqual(claim['funded_spots'], 0)
+        new_participant = MatchParticipant.objects.get(
+            match=self.match, user=newcomer)
+        self.assertEqual(new_participant.payment_status, 'covered')
+        self.assertEqual(new_participant.amount_paid, Decimal('0'))
+        withdrawal.refresh_from_db()
+        self.assertEqual(withdrawal.status, 'replaced')
+        self.assertEqual(withdrawal.replacement_user, newcomer)
+        self.match.refresh_from_db()
+        self.assertEqual(self.match.current_players, 5)
+
+    def test_host_withdraw_transfers_organizer(self):
+        from .match_pot import withdraw_participant
+        self._book()
+        result = withdraw_participant(self.match, self.host)
+        self.match.refresh_from_db()
+        self.assertNotEqual(self.match.organizer_id, self.host.id)
+        self.assertIsNotNone(result['new_organizer_id'])
+        self.assertEqual(result['funded_spots'], 1)
+        self.assertFalse(MatchParticipant.objects.filter(
+            match=self.match, user=self.host, withdrawn_at__isnull=True).exists())
+
+    def test_leave_after_booking_is_blocked(self):
+        self._book()
+        self.auth(self.players[1])
+        res = self.client.post('/api/matches/leave/', {
+            'match_id': self.match.id}, format='json')
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.data.get('code'), 'use_withdraw')
+        self.assertTrue(MatchParticipant.objects.filter(
+            match=self.match, user=self.players[1]).exists())
+
+    def test_host_cancel_before_booking_keeps_20_percent(self):
+        self.auth(self.host)
+        res = self.client.post('/api/matches/cancel/', {
+            'match_id': self.match.id}, format='json')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data['host_fee_kept'], '60.00')
+        host_participant = MatchParticipant.objects.get(
+            match=self.match, user=self.host)
+        self.assertEqual(host_participant.payment_status, 'partially_refunded')
+        player_participant = MatchParticipant.objects.get(
+            match=self.match, user=self.players[0])
+        self.assertEqual(player_participant.payment_status, 'refunded')
+        self.assertTrue(PlatformTransaction.objects.filter(
+            kind='cancellation_fee', amount=Decimal('60.00'),
+            status='collected').exists())
+
+    def test_withdraw_api_and_funded_join_api(self):
+        self._book()
+        self.auth(self.players[2])
+        res = self.client.post(f'/api/matches/{self.match.id}/withdraw/')
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.data['success'])
+        self.assertEqual(res.data['funded_spots'], 1)
+
+        newcomer = self.make_user('apinewcomer')
+        self.auth(newcomer)
+        res = self.client.post('/api/matches/join/', {
+            'match_id': self.match.id}, format='json')
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.data.get('funded'))
+        self.assertEqual(res.data['message'], 'Joined a funded spot — no payment needed')
+
+    def test_withdraw_before_booking_is_rejected(self):
+        from .match_pot import withdraw_participant
+        with self.assertRaises(ValueError):
+            withdraw_participant(self.match, self.players[0])
+
+    def test_settlement_splits_surplus_as_credit(self):
+        from .match_pot import settle_match_pot, withdraw_participant
+        self._book()
+        withdraw_participant(self.match, self.players[0])
+        result = settle_match_pot(self.match, force=True)
+        self.assertEqual(result['credited'], '250.00')
+        self.assertEqual(result['players'], 4)
+        for player in self.players[1:]:
+            account = PlayerCreditAccount.objects.get(user=player)
+            self.assertEqual(account.balance, Decimal('62.50'))
+        pot = MatchPot.objects.get(match=self.match)
+        self.assertEqual(pot.status, 'settled')
+        self.assertFalse(MatchWithdrawal.objects.filter(
+            match=self.match, status='open').exists())
+
+        self.auth(self.players[1])
+        res = self.client.get('/api/credits/')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data['balance'], '62.50')
+
+    def test_settlement_with_no_surplus_creates_no_credit(self):
+        from .match_pot import settle_match_pot
+        self._book()
+        MatchPot.objects.filter(match=self.match).update(surplus=Decimal('0'))
+        result = settle_match_pot(self.match, force=True)
+        self.assertEqual(result['credited'], '0.00')
+        self.assertFalse(PlayerCreditAccount.objects.exists())
+
+
+class CreditAndReservationTests(BaseAPITestCase):
+    def test_partial_credit_is_applied_and_returned_on_refund(self):
+        from .credits import account_for, credit_player
+        from .escrow import refund_participant
+        host = self.make_user('credithost')
+        player = self.make_user('creditplayer')
+        match = self.make_match(host, price=Decimal('250'))
+        participant = MatchParticipant.objects.create(match=match, user=player)
+        credit_player(player, Decimal('100'), 'adjustment')
+
+        self.auth(player)
+        with self.settings(CHAPA_SECRET_KEY='', DEBUG=True):
+            res = self.client.post(f'/api/matches/{match.id}/pay/')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.data['credit_used'], '100.00')
+        self.assertEqual(res.data['amount_due'], '150.00')
+        participant.refresh_from_db()
+        self.assertEqual(participant.payment_status, 'held')
+        self.assertEqual(participant.amount_paid, Decimal('250.00'))
+        self.assertEqual(participant.credit_applied, Decimal('100.00'))
+        self.assertEqual(account_for(player).balance, Decimal('0'))
+
+        refund_participant(participant, percent=100)
+        self.assertEqual(account_for(player).balance, Decimal('100.00'))
+        participant.refresh_from_db()
+        self.assertEqual(participant.credit_applied, Decimal('0'))
+        self.assertEqual(participant.payment_status, 'refunded')
+
+    def test_credit_can_cover_the_full_share(self):
+        from .credits import account_for, credit_player
+        host = self.make_user('fullcredithost')
+        player = self.make_user('fullcreditplayer')
+        match = self.make_match(host, price=Decimal('250'))
+        participant = MatchParticipant.objects.create(match=match, user=player)
+        credit_player(player, Decimal('250'), 'adjustment')
+
+        self.auth(player)
+        with self.settings(CHAPA_SECRET_KEY='', DEBUG=True):
+            res = self.client.post(f'/api/matches/{match.id}/pay/')
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.data.get('paid_with_credit'))
+        self.assertEqual(res.data['amount_due'], '0.00')
+        participant.refresh_from_db()
+        self.assertEqual(participant.payment_status, 'held')
+        self.assertEqual(participant.amount_paid, Decimal('250.00'))
+        self.assertEqual(account_for(player).balance, Decimal('0'))
+        self.assertFalse(Payment.objects.filter(
+            user=player, payment_type='match_share').exists())
+
+    def test_host_payment_reserves_slot_and_blocks_double_booking(self):
+        owner = self.make_user('reserveowner')
+        venue = Venue.objects.create(
+            owner=owner, name='Reserve Pitch', address='Road 3', city='Addis',
+            slot_price=Decimal('1000'), is_available=True)
+        host = self.make_user('reservehost')
+        match = self.make_match(
+            host, price=Decimal('250'), venue=venue,
+            date_time=timezone.now() + timedelta(days=2))
+
+        self.auth(host)
+        with self.settings(CHAPA_SECRET_KEY='', DEBUG=True):
+            res = self.client.post(f'/api/matches/{match.id}/pay/')
+        self.assertEqual(res.status_code, 200)
+
+        booking = VenueBooking.objects.get(match=match)
+        self.assertEqual(booking.status, 'reserved')
+        self.assertEqual(booking.total_price, Decimal('1000.00'))
+
+        other = self.make_user('reserveother')
+        self.auth(other)
+        local = timezone.localtime(match.date_time)
+        date_str = local.date().isoformat()
+        start = local.strftime('%H:%M')
+        end = (local + timedelta(hours=2)).strftime('%H:%M')
+        res = self.client.post('/api/venues/book/', {
+            'venue_id': venue.id, 'date': date_str,
+            'start_time': start, 'end_time': end,
+        }, format='json')
+        self.assertEqual(res.status_code, 409)
+
+        res = self.client.get(
+            f'/api/venues/{venue.id}/availability/?date={date_str}')
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(any(
+            slot['status'] == 'reserved' for slot in res.data['slots']))
+
+
+
 

@@ -129,6 +129,22 @@ class AppRepository {
     return MatchService.joinMatch(token: token, matchId: matchId);
   }
 
+  Future<Map<String, dynamic>> payMatchShare(String token, int matchId) {
+    return MatchService.payMatchShare(token: token, matchId: matchId);
+  }
+
+  Future<Map<String, dynamic>> withdrawMatch(String token, int matchId) {
+    return MatchService.withdrawMatch(token: token, matchId: matchId);
+  }
+
+  Future<Map<String, dynamic>> requestVenueBooking(String token, int matchId) {
+    return MatchService.requestVenueBooking(token: token, matchId: matchId);
+  }
+
+  Future<Map<String, dynamic>> confirmVenueBooking(String token, int matchId) {
+    return MatchService.confirmVenueBooking(token: token, matchId: matchId);
+  }
+
   Future<List<Venue>> getFields({String? sport, bool forceRefresh = false}) =>
       VenueService.getVenues(sport: sport, forceRefresh: forceRefresh);
 

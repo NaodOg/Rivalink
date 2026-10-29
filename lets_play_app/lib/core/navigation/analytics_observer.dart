@@ -35,6 +35,8 @@ class AnalyticsObserver extends NavigatorObserver {
     '/notifications': 'Notifications',
     '/chat': 'Chat',
     '/payments': 'Payments',
+    '/host-earnings': 'Host earnings',
+    '/credits': 'Credits',
     '/settings': 'Settings',
     '/subscription': 'Premium',
     '/edit-profile': 'Edit profile',
