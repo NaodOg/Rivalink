@@ -33,7 +33,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   google_fonts: ^6.2.1
   shared_preferences: ^2.3.2
-  flutter_secure_storage: ^9.2.4
+  flutter_secure_storage: ^11.2.0
   http: ^1.2.2
   http_parser: ^4.0.2
   image_picker: ^1.1.2
