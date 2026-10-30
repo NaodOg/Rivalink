@@ -2,8 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../../core/state/session_controller.dart';
 import '../../core/theme/rivalink_theme.dart';
+import '../widgets/victiqo_wordmark.dart';
 
-/// Branded first frame: the pin with the RIVALINK wordmark directly underneath.
+/// Branded first frame: the pin with the VICTIQO wordmark directly underneath.
 /// Android 12+ cannot place content under the system splash icon, so the
 /// system splash shows only the matching background and this screen provides
 /// the lockup, handing off to [nextRoute] once it has been on screen briefly.
@@ -66,10 +67,9 @@ class _SplashScreenState extends State<SplashScreen>
                   filterQuality: FilterQuality.high,
                 ),
                 const SizedBox(height: 12),
-                Image.asset(
-                  'assets/images/rivalink_wordmark.png',
-                  width: 300,
-                  filterQuality: FilterQuality.high,
+                const VictiqoWordmark(
+                  fontSize: 44,
+                  letterSpacing: 6,
                 ),
               ],
             ),

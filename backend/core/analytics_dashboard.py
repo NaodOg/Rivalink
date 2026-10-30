@@ -79,11 +79,11 @@ def export_report(request):
     if fmt == 'json':
         payload = json.dumps(report, indent=2, default=str)
         content_type = 'application/json'
-        filename = f'rivalink-analytics-{stamp}.json'
+        filename = f'victiqo-analytics-{stamp}.json'
     else:
         payload = render_markdown(report)
         content_type = 'text/markdown; charset=utf-8'
-        filename = f'rivalink-analytics-{stamp}.md'
+        filename = f'victiqo-analytics-{stamp}.md'
 
     response = HttpResponse(payload, content_type=content_type)
     response['Content-Disposition'] = f'attachment; filename="{filename}"'

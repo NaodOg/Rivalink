@@ -526,7 +526,7 @@ def premium_expiry_nudges(days=3, respect_windows=False):
         days_left = max(1, (profile.premium_expires - now).days)
         message = pick(
             variant,
-            f'Your Rivalink Premium ends in {days_left} day(s). '
+            f'Your Victiqo Premium ends in {days_left} day(s). '
             'Renew to keep unlimited hosting and leagues.',
             f'{days_left} day(s) of Premium left. Renew now so your hosting '
             'and league access do not pause.',
@@ -661,7 +661,7 @@ def weekly_recap(limit=300, force=False, respect_windows=False):
             user=user, match__is_active=True, match__date_time__gte=now,
         ).select_related('match').order_by('match__date_time').first()
         variant = copy_variant(user, 'weekly_recap')
-        title = 'Your week on Rivalink'
+        title = 'Your week on Victiqo'
         parts = [f'{played} match{"es" if played != 1 else ""} played']
         if hosted:
             parts.append(f'{hosted} hosted')

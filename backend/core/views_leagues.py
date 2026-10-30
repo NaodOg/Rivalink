@@ -256,7 +256,7 @@ def join_league(request):
 
             if not team_all_premium(team):
                 return Response({
-                    'error': 'All team members need Rivalink Premium to join a league.',
+                    'error': 'All team members need Victiqo Premium to join a league.',
                     'upgrade_required': True,
                 }, status=status.HTTP_402_PAYMENT_REQUIRED)
 

@@ -29,7 +29,7 @@ from .view_shared import (
 def health_check(request):
     return Response({
         "status": "ok",
-        "message": "Rivalink backend connected successfully"
+        "message": "Victiqo backend connected successfully"
     })
 
 

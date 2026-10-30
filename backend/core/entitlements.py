@@ -51,6 +51,6 @@ def team_all_premium(team):
 
 
 PREMIUM_REQUIRED_RESPONSE = {
-    'error': 'This feature requires Rivalink Premium',
+    'error': 'This feature requires Victiqo Premium',
     'upgrade_required': True,
 }

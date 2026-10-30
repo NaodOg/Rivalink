@@ -15,6 +15,7 @@ import '../../core/data/services/ranking_service.dart';
 import '../../core/data/services/analytics_service.dart';
 import '../../core/data/models/match.dart';
 import '../widgets/bottom_tab_bar.dart';
+import '../widgets/explore_match_card.dart';
 import '../widgets/field_card.dart';
 import '../widgets/league_card.dart';
 import '../widgets/match_card.dart';
@@ -1094,6 +1095,27 @@ class _ExploreTabState extends State<_ExploreTab> {
     }).toList();
   }
 
+  RivalinkMatch? get _featuredMatch {
+    final list = _filteredMatches;
+    if (list.isEmpty) return null;
+    for (final match in list) {
+      if (match.spotsLeft > 0) return match;
+    }
+    return list.first;
+  }
+
+  int get _openSpots {
+    var total = 0;
+    for (final match in _filteredMatches) {
+      if (match.spotsLeft > 0) total += match.spotsLeft;
+    }
+    return total;
+  }
+
+  int get _verifiedVenues => _filteredFields
+      .where((venue) => venue.verificationStatus == 'verified')
+      .length;
+
   @override
   void initState() {
     super.initState();
@@ -1128,44 +1150,87 @@ class _ExploreTabState extends State<_ExploreTab> {
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Explore', style: Theme.of(context).textTheme.displaySmall),
-                const SizedBox(height: PFSpacing.lg),
-                PFSegmented(
-                  labels: [
-                    _matches.isEmpty ? 'Matches' : 'Matches (${_matches.length})',
-                    _fields.isEmpty ? 'Venues' : 'Venues (${_fields.length})',
+    final glow = _sportFilter == 'All'
+        ? PFColors.primary
+        : PFSport.color(_sportCode(_sportFilter) ?? 'other');
+    return Stack(
+      children: [
+        Positioned(
+          top: -110,
+          left: -80,
+          right: -80,
+          child: IgnorePointer(
+            child: Container(
+              height: 300,
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  center: const Alignment(0.1, -0.4),
+                  radius: 0.9,
+                  colors: [
+                    glow.withValues(alpha: 0.18),
+                    glow.withValues(alpha: 0.04),
+                    Colors.transparent,
                   ],
-                  index: _segment,
-                  onChanged: (i) => setState(() => _segment = i),
+                  stops: const [0, 0.45, 1],
                 ),
-                const SizedBox(height: PFSpacing.md),
-                SearchHeader(
-                  key: ValueKey('explore-search-$_searchEpoch'),
-                  hint: _segment == 1 ? 'Bole, CMC, Sarbet…' : '5v5 football near Bole',
-                  analyticsScreen: 'Explore',
-                  onChanged: (v) => setState(() => _searchQuery = v),
-                ),
-              ],
+              ),
             ),
           ),
-          Expanded(
-            child: RefreshIndicator(
-              onRefresh: () => _load(forceRefresh: true),
-              color: PFColors.primary,
-              backgroundColor: PFColors.surfaceRaised,
-              child: _buildList(_segment == 1),
-            ),
+        ),
+        SafeArea(
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Explore',
+                        style: Theme.of(context).textTheme.displaySmall),
+                    const SizedBox(height: 4),
+                    Text(
+                      _segment == 1
+                          ? 'Find a pitch. Book the slot.'
+                          : 'Find a game. Fill a pitch.',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    const SizedBox(height: PFSpacing.lg),
+                    PFSegmented(
+                      labels: [
+                        _matches.isEmpty
+                            ? 'Matches'
+                            : 'Matches (${_matches.length})',
+                        _fields.isEmpty
+                            ? 'Venues'
+                            : 'Venues (${_fields.length})',
+                      ],
+                      index: _segment,
+                      onChanged: (i) => setState(() => _segment = i),
+                    ),
+                    const SizedBox(height: PFSpacing.md),
+                    SearchHeader(
+                      key: ValueKey('explore-search-$_searchEpoch'),
+                      hint: _segment == 1
+                          ? 'Bole, CMC, Sarbet…'
+                          : '5v5 football near Bole',
+                      analyticsScreen: 'Explore',
+                      onChanged: (v) => setState(() => _searchQuery = v),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: RefreshIndicator(
+                  onRefresh: () => _load(forceRefresh: true),
+                  color: PFColors.primary,
+                  backgroundColor: PFColors.surfaceRaised,
+                  child: _buildList(_segment == 1),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -1228,38 +1293,70 @@ class _ExploreTabState extends State<_ExploreTab> {
         ),
       );
 
-  List<Widget> _matchAgenda() {
+  List<Widget> _matchAgenda({int? excludeId}) {
     const order = ['Today', 'Tomorrow', 'This weekend', 'This week', 'Later'];
     final groups = <String, List<RivalinkMatch>>{};
     for (final m in _filteredMatches) {
+      if (m.id == excludeId) continue;
       groups.putIfAbsent(_dateBucket(m.dateTime), () => []).add(m);
     }
     final widgets = <Widget>[];
     for (final key in order) {
       final list = groups[key];
       if (list == null || list.isEmpty) continue;
-      final accent = key == 'Today' ? PFColors.primary : PFColors.textTertiary;
+      final accent = switch (key) {
+        'Today' => PFColors.primary,
+        'Tomorrow' => PFColors.secondary,
+        'This weekend' => PFColors.gold,
+        _ => PFColors.textTertiary,
+      };
       widgets.add(Padding(
         padding: EdgeInsets.only(
             top: widgets.isEmpty ? 0 : PFSpacing.xl, bottom: PFSpacing.md),
         child: Row(
           children: [
             Container(
-              width: 6,
-              height: 6,
-              decoration: BoxDecoration(color: accent, shape: BoxShape.circle),
+              width: 30,
+              height: 30,
+              decoration: BoxDecoration(
+                color: accent.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(PFRadius.sm),
+                border: Border.all(color: accent.withValues(alpha: 0.3)),
+              ),
+              alignment: Alignment.center,
+              child: Icon(Icons.calendar_today_rounded,
+                  size: 14, color: accent),
             ),
-            const SizedBox(width: 6),
-            Text(
-              '${key.toUpperCase()} · ${list.length}',
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(color: accent),
+            const SizedBox(width: 10),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  key.toUpperCase(),
+                  style: Theme.of(context)
+                      .textTheme
+                      .labelSmall
+                      ?.copyWith(color: accent, letterSpacing: 1.2),
+                ),
+                Text(
+                  '${list.length} ${list.length == 1 ? 'match' : 'matches'}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Container(
+                height: 1,
+                color: accent.withValues(alpha: 0.18),
+              ),
             ),
           ],
         ),
       ));
       for (var i = 0; i < list.length; i++) {
         final m = list[i];
-        widgets.add(MatchCard(
+        widgets.add(ExploreMatchCard(
           match: m,
           onTap: () => Navigator.pushNamed(context, AppRoutes.matchDetails,
               arguments: m.id),
@@ -1329,11 +1426,36 @@ class _ExploreTabState extends State<_ExploreTab> {
       children: [
         _chips(),
         const SizedBox(height: PFSpacing.md),
-        Text(
-          _filtersActive ? '$countLabel · ${_filtersActiveLabel()}' : countLabel,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: Theme.of(context).textTheme.labelSmall,
+        Row(
+          children: [
+            Container(
+              width: 6,
+              height: 6,
+              decoration: BoxDecoration(
+                color: isVenues ? PFColors.gold : PFColors.primary,
+                shape: BoxShape.circle,
+              ),
+            ),
+            const SizedBox(width: 7),
+            Expanded(
+              child: Text(
+                _filtersActive
+                    ? '$countLabel · ${_filtersActiveLabel()}'
+                    : countLabel,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.labelSmall,
+              ),
+            ),
+            Text(
+              isVenues
+                  ? '$_verifiedVenues verified'
+                  : '$_openSpots spots open',
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: isVenues ? PFColors.gold : PFColors.success,
+                  ),
+            ),
+          ],
         ),
         const SizedBox(height: PFSpacing.lg),
         if (_error)
@@ -1358,8 +1480,18 @@ class _ExploreTabState extends State<_ExploreTab> {
           )
         else if (isVenues)
           ..._venueSections()
-        else
-          ..._matchAgenda(),
+        else ...[
+          if (_featuredMatch != null) ...[
+            ExploreFeaturedMatchCard(
+              match: _featuredMatch!,
+              onTap: () => Navigator.pushNamed(
+                  context, AppRoutes.matchDetails,
+                  arguments: _featuredMatch!.id),
+            ),
+            const SizedBox(height: PFSpacing.xxl),
+          ],
+          ..._matchAgenda(excludeId: _featuredMatch?.id),
+        ],
       ],
     );
   }
@@ -1915,7 +2047,7 @@ class _ProfileTabState extends State<_ProfileTab> {
                       Navigator.pushNamed(context, AppRoutes.notifications)),
               _MenuTile(
                   icon: PFIcons.crown,
-                  label: 'Rivalink Premium',
+                  label: 'Victiqo Premium',
                   tint: PFColors.textSecondary,
                   onTap: () => Navigator.pushNamed(context, AppRoutes.subscription)),
               _MenuTile(
@@ -2101,7 +2233,7 @@ class _ProfileTabState extends State<_ProfileTab> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(isPremium ? 'Rivalink Premium' : 'Go Premium',
+                Text(isPremium ? 'Victiqo Premium' : 'Go Premium',
                     style: Theme.of(context).textTheme.titleSmall),
                 const SizedBox(height: 2),
                 Text(
@@ -2179,7 +2311,7 @@ class _ProfileTabState extends State<_ProfileTab> {
             expand: false,
             onTap: () {
               Clipboard.setData(ClipboardData(
-                  text: 'Join me on Rivalink! Use my code ${_social!['referral_code']} to get started.'));
+                  text: 'Join me on Victiqo! Use my code ${_social!['referral_code']} to get started.'));
               ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Invite copied to clipboard')));
             },

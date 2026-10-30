@@ -76,7 +76,7 @@ def password_reset_request(request):
         profile.reset_token = code
         profile.reset_token_expires = timezone.now() + timedelta(minutes=RESET_CODE_TTL_MINUTES)
         profile.save(update_fields=['reset_token', 'reset_token_expires'])
-        sent = send_sms(profile.phone, f'Your Rivalink password reset code is {code}') if profile.phone else False
+        sent = send_sms(profile.phone, f'Your Victiqo password reset code is {code}') if profile.phone else False
         log_event(request, 'password_reset_request', user, 'ok', f'sms_sent={sent}')
         if not sent and settings.DEBUG:
             payload['dev_code'] = code

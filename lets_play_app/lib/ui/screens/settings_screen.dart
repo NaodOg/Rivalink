@@ -10,6 +10,7 @@ import '../../core/data/services/analytics_service.dart';
 import '../widgets/pf_badge.dart';
 import '../widgets/pf_card.dart';
 import '../widgets/pf_scaffold.dart';
+import '../widgets/victiqo_wordmark.dart';
 
 class SettingsScreen extends StatelessWidget {
   final SessionController session;
@@ -21,7 +22,7 @@ class SettingsScreen extends StatelessWidget {
       builder: (ctx) => AlertDialog(
         backgroundColor: PFColors.surfaceRaised,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Leave Rivalink?',
+        title: const Text('Leave Victiqo?',
             style: TextStyle(fontWeight: FontWeight.w700)),
         content: const Text('Are you sure you want to log out?',
             style: TextStyle(color: PFColors.textSecondary)),
@@ -63,7 +64,7 @@ class SettingsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final user = session.user ?? <String, dynamic>{};
     final name = user['name']?.toString() ?? 'Player';
-    final email = user['email']?.toString() ?? 'player@Rivalink.app';
+    final email = user['email']?.toString() ?? 'player@Victiqo.app';
     final location = user['location']?.toString() ?? '';
     final isPremium = user['is_premium'] == true;
     final profileImage = MediaConfig.resolve(user['profile_image']?.toString());
@@ -255,12 +256,8 @@ class SettingsScreen extends StatelessWidget {
                           color: PFColors.primary, shape: BoxShape.circle),
                     ),
                     const SizedBox(width: 6),
-                    const Text('RIVALINK',
-                        style: TextStyle(
-                            fontSize: 10,
-                            letterSpacing: 2.4,
-                            fontWeight: FontWeight.w800,
-                            color: PFColors.textTertiary)),
+                    const VictiqoWordmark(
+                        fontSize: 10, letterSpacing: 2.4),
                   ],
                 ),
                 const SizedBox(height: 4),
@@ -502,7 +499,7 @@ class _PremiumCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                      isPremium ? 'Rivalink Premium' : 'Go Premium',
+                      isPremium ? 'Victiqo Premium' : 'Go Premium',
                       style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 2),
                   Text(
@@ -710,7 +707,7 @@ class _AnalyticsToggleState extends State<_AnalyticsToggle> {
       title: const Text('Share usage analytics',
           style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
       subtitle: const Text(
-        'Help improve Rivalink. No personal data is collected.',
+        'Help improve Victiqo. No personal data is collected.',
         style: TextStyle(fontSize: 11.5, color: PFColors.textTertiary),
       ),
       trailing: Switch(

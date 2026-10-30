@@ -163,6 +163,7 @@ class PFType {
   PFType._();
 
   static const String display = 'SpaceGrotesk';
+  static const String brand = 'Orbitron';
   static const String body = 'Manrope';
   static const List<FontFeature> tabular = [FontFeature.tabularFigures()];
 

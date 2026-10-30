@@ -99,7 +99,7 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
                             Expanded(
                               child: Text(
                                 'Checkout is handled by Chapa. '
-                                'Rivalink never stores your card details.',
+                                'Victiqo never stores your card details.',
                                 style: Theme.of(context).textTheme.bodySmall,
                               ),
                             ),

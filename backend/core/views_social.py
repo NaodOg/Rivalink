@@ -731,7 +731,7 @@ def send_phone_code(request):
     profile.phone_code = code
     profile.phone_code_expires = timezone.now() + timedelta(minutes=10)
     profile.save(update_fields=['phone', 'phone_code', 'phone_code_expires'])
-    sent = send_sms(phone, f'Your Rivalink verification code is {code}')
+    sent = send_sms(phone, f'Your Victiqo verification code is {code}')
     payload = {'success': True, 'sent': sent}
     if settings.DEBUG and not sent:
         payload['dev_code'] = code

@@ -181,7 +181,7 @@ class _RivalinkAppState extends State<RivalinkApp> {
       valueListenable: L10n.locale,
       builder: (context, _, __) => MaterialApp(
         debugShowCheckedModeBanner: false,
-        title: 'Rivalink',
+        title: 'VICTIQO',
         theme: RivalinkTheme.dark,
         navigatorObservers: [AnalyticsObserver()],
         initialRoute: AppRoutes.splash,

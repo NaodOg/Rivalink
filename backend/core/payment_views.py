@@ -138,7 +138,7 @@ def initialize_premium_payment(request):
         amount=PREMIUM_AMOUNT,
         currency='ETB',
         payment_type='premium',
-        description='Rivalink Premium Subscription - 1 month',
+        description='Victiqo Premium Subscription - 1 month',
     )
 
     return_url = request.data.get('return_url', '')
@@ -151,7 +151,7 @@ def initialize_premium_payment(request):
         "callback_url": f"{settings.SITE_URL}/api/payments/webhook/",
         "return_url": return_url,
         "customization": {
-            "title": "Rivalink Premium",
+            "title": "Victiqo Premium",
             "description": "Premium Subscription - 100 ETB/month",
         }
     }

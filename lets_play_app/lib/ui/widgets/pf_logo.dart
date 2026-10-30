@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
-import '../../core/theme/rivalink_theme.dart';
+import 'victiqo_wordmark.dart';
 
-/// RIVALINK brand lockup: the pin+trophy mark plus the wordmark.
+/// VICTIQO brand lockup: the pin+trophy mark plus the wordmark.
 class PFLogo extends StatelessWidget {
   final double markSize;
   final bool showWordmark;
@@ -22,19 +22,15 @@ class PFLogo extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final mark = Image.asset(
-      'assets/images/rivalink_mark.png',
+      'assets/images/rivalink_pin.png',
       height: markSize,
       filterQuality: FilterQuality.high,
     );
     if (!showWordmark) return mark;
-    final word = Text(
-      'RIVALINK',
-      style: TextStyle(
-        fontSize: wordSize,
-        fontWeight: FontWeight.w800,
-        letterSpacing: wordSize * 0.14,
-        color: wordColor ?? PFColors.text,
-      ),
+    final word = VictiqoWordmark(
+      fontSize: wordSize,
+      letterSpacing: wordSize * 0.14,
+      baseColor: wordColor ?? Colors.white,
     );
     if (vertical) {
       return Column(

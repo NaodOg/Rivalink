@@ -689,7 +689,7 @@ class AnalyticsDashboardTests(BaseAPITestCase):
         self.client.force_login(staff)
         res = self.client.get('/insights/?days=7')
         self.assertEqual(res.status_code, 200)
-        self.assertIn(b'Rivalink Insights', res.content)
+        self.assertIn(b'Victiqo Insights', res.content)
         self.assertIn(b'Growth models', res.content)
 
     def test_export_requires_staff(self):

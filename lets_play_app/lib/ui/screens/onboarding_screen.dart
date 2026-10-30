@@ -6,6 +6,7 @@ import '../../core/theme/rivalink_theme.dart';
 import '../widgets/pf_badge.dart';
 import '../widgets/pf_button.dart';
 import '../widgets/pf_sport_tile.dart';
+import '../widgets/victiqo_wordmark.dart';
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -76,11 +77,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               padding: const EdgeInsets.fromLTRB(20, 12, 12, 0),
               child: Row(
                 children: [
-                  Text('Rivalink',
-                      style: Theme.of(context)
-                          .textTheme
-                          .titleLarge!
-                          .copyWith(letterSpacing: 3)),
+                  const VictiqoWordmark(
+                    fontSize: 22,
+                    letterSpacing: 3,
+                  ),
                   const Spacer(),
                   TextButton(onPressed: _finish, child: const Text('Skip')),
                 ],

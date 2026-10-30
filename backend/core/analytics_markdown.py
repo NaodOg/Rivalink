@@ -13,7 +13,7 @@ def render_markdown(report):
     u = report['users']
     s = report['sessions']
     lines = [
-        '# Rivalink — Product Analytics Report',
+        '# Victiqo - Product Analytics Report',
         '',
         f"**Period:** last {report['period_days']} days  ",
         f"**Generated:** {report['generated_at']}",

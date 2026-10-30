@@ -1490,7 +1490,7 @@ def pay_match_share(request, match_id):
         'callback_url': f'{settings.SITE_URL}/api/payments/webhook/',
         'return_url': request.data.get('return_url', ''),
         'customization': {
-            'title': 'Rivalink share',
+            'title': 'Victiqo share',
             'description': f'Match {match.id} share',
         },
     }

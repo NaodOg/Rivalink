@@ -404,7 +404,7 @@ class _HostEarningsScreenState extends State<HostEarningsScreen> {
                       const SizedBox(height: PFSpacing.lg),
                       Text(
                         'Released shares become available to withdraw. '
-                        '“Paid out” means the transfer has left Rivalink and the '
+                        '“Paid out” means the transfer has left Victiqo and the '
                         'reference is recorded.',
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
@@ -457,8 +457,8 @@ class _HostEarningsScreenState extends State<HostEarningsScreen> {
           const SizedBox(height: 6),
           Text(
             negative
-                ? 'Future match releases will first cover the refunds Rivalink fronted.'
-                : 'Minimum withdrawal ${_br(_minimum)} · reviewed by the Rivalink team',
+                ? 'Future match releases will first cover the refunds Victiqo fronted.'
+                : 'Minimum withdrawal ${_br(_minimum)} · reviewed by the Victiqo team',
             style: Theme.of(context).textTheme.bodySmall,
           ),
         ],

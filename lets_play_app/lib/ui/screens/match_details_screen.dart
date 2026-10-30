@@ -609,7 +609,7 @@ class _MatchDetailsScreenState extends State<MatchDetailsScreen> {
   void _shareMatch() {
     final spots = _spots <= 0 ? 'Full' : '$_spots spots left';
     Clipboard.setData(ClipboardData(
-      text: '${_sport.toUpperCase()} · $_title\n${prettyDate(_dateTime)} · $_location\n$spots — join on Rivalink!',
+      text: '${_sport.toUpperCase()} · $_title\n${prettyDate(_dateTime)} · $_location\n$spots — join on Victiqo!',
     ));
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Match details copied — paste to share')),
@@ -625,7 +625,7 @@ class _MatchDetailsScreenState extends State<MatchDetailsScreen> {
       builder: (ctx) => AlertDialog(
         backgroundColor: PFColors.surfaceRaised,
         title: const Text('Report host?'),
-        content: const Text('This helps keep Rivalink safe. Our team will review it.'),
+        content: const Text('This helps keep Victiqo safe. Our team will review it.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
           TextButton(
@@ -990,7 +990,7 @@ class _MatchDetailsScreenState extends State<MatchDetailsScreen> {
           Text(
             fee > 0
                 ? 'Field Br ${_funding['venue_amount'] ?? '0'} + '
-                    'Rivalink fee Br ${fee.toStringAsFixed(0)}'
+                    'Victiqo fee Br ${fee.toStringAsFixed(0)}'
                 : 'Free field — no service fee',
             style: Theme.of(context).textTheme.bodySmall,
           ),

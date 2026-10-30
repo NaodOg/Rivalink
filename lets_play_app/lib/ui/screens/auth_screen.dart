@@ -331,7 +331,7 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
           const SizedBox(height: PFSpacing.lg),
           Center(
             child: Text(
-              'By continuing you agree to Rivalink Terms & Privacy.',
+              'By continuing you agree to Victiqo Terms & Privacy.',
               style: Theme.of(context).textTheme.labelSmall,
               textAlign: TextAlign.center,
             ),
